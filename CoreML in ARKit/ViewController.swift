@@ -3,6 +3,13 @@
 //  SUWARERU
 //
 //  Created by Sugitani on 2026/01/15.
+//  Copyright © 2026 CompanyName. All rights reserved.
+//
+
+
+//
+//  ViewController.swift
+//  CoreML in ARKit
 //
 
 import UIKit
@@ -31,6 +38,10 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
 
     // 最新ラベル（任意のデバッグ用）
     var latestPrediction: String = "…"
+    var isGuidancePaused = true
+
+    private let directionFeedback = UIImpactFeedbackGenerator(style: .medium)
+    private let arrivalFeedback = UINotificationFeedbackGenerator()
 
     // MARK: - CoreML / Vision
     var visionRequests: [VNRequest] = []
@@ -147,7 +158,6 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
         sceneView.scene = SCNScene()
         sceneView.scene.rootNode.addChildNode(autoLabelsRoot)
 
-        // ★ BBOX用オーバーレイビューを sceneView の上にかぶせる
         bboxOverlayView = UIView(frame: sceneView.bounds)
         bboxOverlayView.backgroundColor = .clear
         bboxOverlayView.isUserInteractionEnabled = false
@@ -162,6 +172,9 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
         request.imageCropAndScaleOption = .scaleFit
         visionRequests = [request]
         tts.delegate = self
+        configureAccessibility()
+        directionFeedback.prepare()
+        arrivalFeedback.prepare()
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -170,6 +183,9 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
         self.viewSize = self.sceneView.bounds.size
         // 連続推論ループ開始
         self.startCoreMLLoopIfNeeded()
+        if isGuidancePaused {
+            announceForAccessibility("案内は停止中です。開始ボタンから案内を開始できます。")
+        }
     }
     
     override func viewWillAppear(_ animated: Bool) {
@@ -364,6 +380,7 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
         let lines = sorted.prefix(2).map { "\($0.label) - \(Int($0.confidence * 100))%" }.joined(separator: "\n")
         DispatchQueue.main.async {
             self.debugTextView.text = lines
+            self.debugTextView.accessibilityValue = lines.isEmpty ? "検出なし" : lines
             if let first = sorted.first { self.latestPrediction = first.label }
             // このフレームで検出した BBOX を画面に反映
             self.updateBoundingBoxes(with: sorted)
@@ -514,7 +531,7 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
                             // フラグを立てる（以降は繰り返さない）
                             self.tracks[tid]?.arrivalAnnounced = true
                             // 終了確認を表示
-                            if self.askExitOnArrivalEnabled {
+                            if self.askExitOnArrivalEnabled && !self.isGuidancePaused {
                                 shouldShowArrivalPanel = true
                             }
                         }
@@ -530,13 +547,16 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
 
         DispatchQueue.main.async {
             self.TextView.text = angleLines   // 空でも毎回更新してOK（好み）
+            self.TextView.accessibilityValue = angleLines.isEmpty ? "検出なし" : angleLines
             if shouldShowArrivalPanel {
                 self.showArrivalPanel()
             }
         }
 
-        for track in tracksToSpeak {
-            self.speak(track: track)
+        if !isGuidancePaused {
+            for track in tracksToSpeak {
+                self.speak(track: track)
+            }
         }
     }
     
@@ -775,11 +795,6 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
         if let q2 = sceneView.raycastQuery(from: pt, allowing: .estimatedPlane, alignment: .any) {
             if let hit = sceneView.session.raycast(q2).first { return hit.worldTransform }
         }
-        let fp = sceneView.hitTest(pt, types: [.featurePoint])
-        if let far = fp.max(by: { $0.distance < $1.distance }) {
-            if far.distance < 0.5 { return nil } // 近すぎる誤ヒットを弾く
-            return far.worldTransform
-        }
         return nil
     }
 
@@ -884,6 +899,10 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
                            rate: Float = AVSpeechUtteranceDefaultSpeechRate * 1.0,
                            pitch: Float = 1.0,
                            volume: Float = 1.0) {
+        if isVoiceOverRunning() {
+            announceForAccessibility(text)
+            return
+        }
         // しゃべっていたら即停止（キューも含めて破棄）
         tts.stopSpeaking(at: .immediate)
         // クールダウン管理をしているなら、ここでリセットしておく
@@ -903,7 +922,7 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
     
     func speak(track: Track, labelOverride: String? = nil) {
         // 終了処理中／到着パネル表示中はナビ音声を出さない
-        if isFinishingNavigation || isAwaitingArrivalDecision {
+        if isFinishingNavigation || isAwaitingArrivalDecision || isGuidancePaused {
             return
         }
         
@@ -920,6 +939,7 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
         // ここまで来たら「いまは無音 or しゃべり終わり直後」なので
         // すぐにこの Track を実際に読み上げてOK
         lastSpokenAt[track.id] = now
+        directionFeedback.impactOccurred()
 
         // ---- ここから先は、これまでの文言生成ロジックそのままでOK ----
         let t = track.worldTransform
@@ -932,6 +952,11 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
         }
         parts.append(distancePhrase(fromMeters: liveDistanceMeters(for: track)))
         let sentence = parts.joined(separator: "、")
+
+        if isVoiceOverRunning() {
+            announceForAccessibility(sentence)
+            return
+        }
 
         let utt = AVSpeechUtterance(string: sentence)
         utt.voice = AVSpeechSynthesisVoice(language: "ja-JP")
@@ -948,7 +973,11 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
 
     func speakNoSeatWarning() {
         // パネル中はしゃべらない
-        if isAwaitingArrivalDecision { return }
+        if isAwaitingArrivalDecision || isGuidancePaused { return }
+        if isVoiceOverRunning() {
+            announceForAccessibility("空席が見つかりません。カメラで左右を写してください。")
+            return
+        }
         interruptAndSpeak(
             text: "空席が見つかりません。カメラで左右を写してください。",
             rate: AVSpeechUtteranceDefaultSpeechRate * 1.1,
@@ -958,12 +987,17 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
     }
 
     func speakArrivalPanelGuide() {
+        if isGuidancePaused { return }
         let utt = AVSpeechUtterance(string: "空席に到着しました。ナビを終了しますか？終了するには画面左側、続けるには画面右側をタップしてください。")
             utt.voice = AVSpeechSynthesisVoice(language: "ja-JP")
             utt.rate = AVSpeechUtteranceDefaultSpeechRate * 1.1
         utt.pitchMultiplier = 0.9
             utt.volume = 1.0
         DispatchQueue.main.async { [weak self] in
+            if self?.isVoiceOverRunning() == true {
+                self?.announceForAccessibility(utt.speechString)
+                return
+            }
             self?.speakWithSFX(utt)
             }
     }
@@ -971,7 +1005,7 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
     
     func speakNoSeatFinalAndExit() {
         // パネル表示中なら、そもそもここも入れたくないなら return でもOK
-        if isAwaitingArrivalDecision { return }
+        if isAwaitingArrivalDecision || isGuidancePaused { return }
         let text = "空席が見つかりませんでした。空席ナビを終了します。"
         let utt = AVSpeechUtterance(string: text)
         utt.voice = AVSpeechSynthesisVoice(language: "ja-JP")
@@ -988,7 +1022,12 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
             self.lastSpokenAt.removeAll()
 
             // 終了アナウンスを新しく再生
-            self.tts.speak(utt)
+            if self.isVoiceOverRunning() {
+                self.announceForAccessibility(utt.speechString)
+            } else {
+                self.tts.speak(utt)
+                self.announceForAccessibility("空席が見つかりませんでした。案内を終了します。")
+            }
 
             // 少し待ってから自動終了（テキストの長さに合わせて調整）
             let delay: TimeInterval = 4.0
@@ -1102,6 +1141,9 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
 
             // パネルを表示
             self.arrivalPanelView.isHidden = false
+            self.arrivalFeedback.notificationOccurred(.success)
+            self.announceForAccessibility("空席に到着しました。終了するか続けるか選択してください。")
+            UIAccessibilityPostNotification(UIAccessibilityScreenChangedNotification, self.arrivalPanelView)
 
             // まず最初の1回をすぐ案内
             self.speakArrivalPanelGuide()
@@ -1136,6 +1178,35 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
 
         // クールダウン管理用の履歴もリセットしておく
         lastSpokenAt.removeAll()
+    }
+
+    private func configureAccessibility() {
+        arrivalPanelView.isAccessibilityElement = true
+        arrivalPanelView.accessibilityLabel = "到着確認"
+        arrivalPanelView.accessibilityHint = "終了するか続けるかを選択してください。"
+
+        arrivalContinueButton.isAccessibilityElement = true
+        arrivalContinueButton.accessibilityLabel = "案内を続ける"
+        arrivalContinueButton.accessibilityHint = "空席案内を続行します。"
+
+        arrivalFinishButton.isAccessibilityElement = true
+        arrivalFinishButton.accessibilityLabel = "案内を終了する"
+        arrivalFinishButton.accessibilityHint = "空席案内を終了します。"
+
+        TextView.isAccessibilityElement = true
+        TextView.accessibilityLabel = "検出状況"
+        TextView.accessibilityValue = "検出なし"
+
+        debugTextView.isAccessibilityElement = true
+        debugTextView.accessibilityLabel = "検出の詳細"
+    }
+
+    private func announceForAccessibility(_ message: String) {
+        UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification, message)
+    }
+
+    private func isVoiceOverRunning() -> Bool {
+        UIAccessibilityIsVoiceOverRunning()
     }
     
     func playSFX(named filename: String, completion: (() -> Void)? = nil) {
