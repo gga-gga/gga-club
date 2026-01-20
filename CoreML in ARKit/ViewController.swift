@@ -41,9 +41,12 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
     var latestPrediction: String = "…"
     var isGuidancePaused = true
 
-    private let directionFeedback = UIImpactFeedbackGenerator(style: .medium)
+    private var directionFeedback = UIImpactFeedbackGenerator(style: .medium)
     private let arrivalFeedback = UINotificationFeedbackGenerator()
-
+    private var directionHapticTimer: DispatchSourceTimer?
+    private var currentHapticStyle: UIImpactFeedbackGenerator.FeedbackStyle = .medium
+    private var currentHapticIntensity: CGFloat = 0.6
+    private var currentHapticInterval: TimeInterval = 0.8
     // MARK: - CoreML / Vision
     var visionRequests: [VNRequest] = []
     let dispatchQueueML = DispatchQueue(label: "com.hw.dispatchqueueml")
@@ -565,6 +568,13 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
             // 検出を使い切る（必要なら残す設計でもOK）
             self.pendingDetections.removeAll()
         }
+        let activeSeatTracks = self.tracks.values.filter { tr in
+            self.seatLabels.contains(tr.label) && time - tr.lastSeen <= self.trackTimeout
+        }
+        let targetTrack = activeSeatTracks.min { lhs, rhs in
+            self.liveDistanceMeters(for: lhs) < self.liveDistanceMeters(for: rhs)
+        }
+        self.updateDirectionHaptics(for: targetTrack)
         let statusSummary = "状況確認中\n空席: \(currentEmptySeatCount)  人: \(currentPersonCount)"
         guard didProcessDetections || isGuidancePaused else { return }
 
@@ -921,7 +931,88 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
         if m < 3.0 { return String(format: "残り%.1fメートル", m) }      // 2.3m → 2.3メートル
         return String(format: "残り%.0fメートル", round(m))               // 5.2m → 5メートル
     }
+    
+    /// 方向フレーズを基準にした角度差（0〜180）を算出
+    func directionDifferenceAngleDeg(fromYawDeg yaw: Float?) -> Float? {
+        guard let yaw = yaw, let phrase = directionPhrase(fromYawDeg: yaw) else { return nil }
+        let hourString = phrase.replacingOccurrences(of: "時方向", with: "")
+        guard let hour = Int(hourString) else { return nil }
 
+        let targetDeg = Float(hour % 12) * 30.0
+        var clockDeg = -yaw
+        if clockDeg < 0 { clockDeg += 360 }
+        if clockDeg >= 360 { clockDeg -= 360 }
+
+        let diff = abs(clockDeg - targetDeg)
+        return min(diff, 360 - diff)
+    }
+
+    private func hapticConfig(for angleDiff: Float) -> (style: UIImpactFeedbackGenerator.FeedbackStyle, intensity: CGFloat, interval: TimeInterval) {
+        switch angleDiff {
+        case 0...5:
+            return (.heavy, 1.0, 0.2)
+        case 5...15:
+            return (.medium, 0.75, 0.4)
+        case 15...30:
+            return (.light, 0.5, 0.7)
+        default:
+            return (.light, 0.3, 1.2)
+        }
+    }
+
+    private func stopDirectionHaptics() {
+        directionHapticTimer?.cancel()
+        directionHapticTimer = nil
+    }
+
+    private func updateDirectionHaptics(for track: Track?) {
+        guard !isGuidancePaused,
+              !isAwaitingArrivalDecision,
+              !isFinishingNavigation,
+              let track = track,
+              let yaw = liveYawDeg(for: track),
+              let angleDiff = directionDifferenceAngleDeg(fromYawDeg: yaw) else {
+            stopDirectionHaptics()
+            return
+        }
+
+        let config = hapticConfig(for: angleDiff)
+        let needsStyleUpdate = config.style != currentHapticStyle
+        let needsIntervalUpdate = config.interval != currentHapticInterval
+        let needsIntensityUpdate = config.intensity != currentHapticIntensity
+
+        if needsStyleUpdate {
+            directionFeedback = UIImpactFeedbackGenerator(style: config.style)
+            currentHapticStyle = config.style
+        }
+        if needsIntervalUpdate {
+            currentHapticInterval = config.interval
+        }
+        if needsIntensityUpdate {
+            currentHapticIntensity = config.intensity
+        }
+
+        if needsStyleUpdate || needsIntervalUpdate || needsIntensityUpdate || directionHapticTimer == nil {
+            directionFeedback.prepare()
+        }
+
+        if needsIntervalUpdate || directionHapticTimer == nil {
+            stopDirectionHaptics()
+            let timer = DispatchSource.makeTimerSource(queue: .main)
+            timer.schedule(deadline: .now(), repeating: currentHapticInterval)
+            timer.setEventHandler { [weak self] in
+                guard let self = self else { return }
+                if #available(iOS 13.0, *) {
+                    self.directionFeedback.impactOccurred(intensity: self.currentHapticIntensity)
+                } else {
+                    self.directionFeedback.impactOccurred()
+                }
+                self.directionFeedback.prepare()
+            }
+            directionHapticTimer = timer
+            timer.activate()
+        }
+    }
     /// いま話している内容やキューを全部止めて、すぐ新しいテキストを読み上げる
     func interruptAndSpeak(text: String,
                            rate: Float = AVSpeechUtteranceDefaultSpeechRate * 1.0,
@@ -967,7 +1058,6 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
         // ここまで来たら「いまは無音 or しゃべり終わり直後」なので
         // すぐにこの Track を実際に読み上げてOK
         lastSpokenAt[track.id] = now
-        directionFeedback.impactOccurred()
 
         // ---- ここから先は、これまでの文言生成ロジックそのままでOK ----
         let t = track.worldTransform
@@ -1097,7 +1187,8 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
         arrivalPanelRepeatTimer = nil
         noSeatTimer?.invalidate()
         noSeatTimer = nil
-
+        stopDirectionHaptics()
+        
         // 音声を即停止
         tts.stopSpeaking(at: .immediate)
         lastSpokenAt.removeAll()
