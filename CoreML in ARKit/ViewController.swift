@@ -967,7 +967,6 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
 
     private func updateDirectionHaptics(for track: Track?) {
         guard !isGuidancePaused,
-              !isAwaitingArrivalDecision,
               !isFinishingNavigation,
               let track = track,
               let yaw = liveYawDeg(for: track),
