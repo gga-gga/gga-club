@@ -27,10 +27,10 @@ final class StartViewController: UIViewController {
 
     override func prepare(for segue: UIStoryboardSegue, sender: Any?) {
         if let destination = segue.destination as? ViewController {
-            destination.isGuidancePaused = false
+            destination.isGuidancePaused = true
         } else if let nav = segue.destination as? UINavigationController,
                   let destination = nav.viewControllers.first as? ViewController {
-            destination.isGuidancePaused = false
+            destination.isGuidancePaused = true
         }
     }
 
