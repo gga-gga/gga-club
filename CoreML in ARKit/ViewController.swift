@@ -27,6 +27,7 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
     @IBOutlet weak var debugTextView: UITextView!
     @IBOutlet weak var TextView: UITextView!
     @IBOutlet weak var arrivalPanelView: UIView!
+    @IBOutlet weak var startGuidanceButton: UIButton!
     @IBOutlet weak var arrivalContinueButton: UIButton!
     @IBOutlet weak var arrivalFinishButton: UIButton!
     
@@ -147,7 +148,8 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
 
     var tracks: [UUID: Track] = [:]
     var lastProcessTime: TimeInterval = 0
-
+    private var lastEmptySeatCount: Int = 0
+    private var lastPersonCount: Int = 0
     // MARK: - Life Cycle
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -186,6 +188,7 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
         if isGuidancePaused {
             announceForAccessibility("案内は停止中です。開始ボタンから案内を開始できます。")
         }
+        startGuidanceButton.isHidden = !isGuidancePaused
     }
     
     override func viewWillAppear(_ animated: Bool) {
@@ -306,9 +309,20 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
             print("Vision error:", error.localizedDescription)
             return
         }
-        guard let objects = request.results as? [VNRecognizedObjectObservation],
-              !objects.isEmpty else { return }
-
+        guard let objects = request.results as? [VNRecognizedObjectObservation] else { return }
+        if objects.isEmpty {
+            stateQueue.sync {
+                self.lastEmptySeatCount = 0
+                self.lastPersonCount = 0
+                self.pendingDetections.removeAll()
+            }
+            DispatchQueue.main.async { [weak self] in
+                self?.debugTextView.text = ""
+                self?.debugTextView.accessibilityValue = "検出なし"
+                self?.updateBoundingBoxes(with: [])
+            }
+            return
+        }
         // viewSize が 0 の場合はメインスレッドで拾ってから続行
         if viewSize.width <= 0 || viewSize.height <= 0 {
             DispatchQueue.main.async {
@@ -359,7 +373,11 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
 
         // person は今回はトラッキングに使わないので pendingDetections には積まない
         let filteredDetections = emptyChairs
-
+        stateQueue.sync {
+            self.lastEmptySeatCount = emptyChairs.count
+            self.lastPersonCount = personDetections.count
+        }
+        
         guard !filteredDetections.isEmpty else {
             // 検出が無いときはBBOXを全部消す
             DispatchQueue.main.async { [weak self] in
@@ -397,6 +415,8 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
         var tracksToSpeak: [Track] = []
         var shouldShowArrivalPanel = false
         var didProcessDetections = false
+        var currentEmptySeatCount = 0
+        var currentPersonCount = 0
 
         stateQueue.sync {
             // 安全な掃除
@@ -411,6 +431,9 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
                 self.tracks.removeValue(forKey: key)
             }
 
+            currentEmptySeatCount = self.lastEmptySeatCount
+            currentPersonCount = self.lastPersonCount
+            
             guard !self.pendingDetections.isEmpty else { return }
             didProcessDetections = true
 
@@ -542,12 +565,17 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
             // 検出を使い切る（必要なら残す設計でもOK）
             self.pendingDetections.removeAll()
         }
-
-        guard didProcessDetections else { return }
+        let statusSummary = "状況確認中\n空席: \(currentEmptySeatCount)  人: \(currentPersonCount)"
+        guard didProcessDetections || isGuidancePaused else { return }
 
         DispatchQueue.main.async {
-            self.TextView.text = angleLines   // 空でも毎回更新してOK（好み）
-            self.TextView.accessibilityValue = angleLines.isEmpty ? "検出なし" : angleLines
+            if self.isGuidancePaused {
+                self.TextView.text = statusSummary
+                self.TextView.accessibilityValue = statusSummary
+            } else {
+                self.TextView.text = angleLines   // 空でも毎回更新してOK（好み）
+                self.TextView.accessibilityValue = angleLines.isEmpty ? "検出なし" : angleLines
+            }
             if shouldShowArrivalPanel {
                 self.showArrivalPanel()
             }
@@ -1132,7 +1160,12 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
             }
         }
     }
-
+    
+    @IBAction func onTapStartGuidance(_ sender: UIButton) {
+        isGuidancePaused = false
+        startGuidanceButton.isHidden = true
+        announceForAccessibility("案内を開始します。")
+    }
     
     func showArrivalPanel() {
         DispatchQueue.main.async {
