@@ -31,6 +31,10 @@ final class ShortcutActionCenter {
     static let shared = ShortcutActionCenter()
 
     private var pendingAction: ShortcutAction?
+    
+    func isPending(_ action: ShortcutAction) -> Bool {
+        pendingAction == action
+    }
 
     func post(_ action: ShortcutAction) {
         pendingAction = action
