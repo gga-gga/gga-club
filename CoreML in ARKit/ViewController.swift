@@ -896,8 +896,11 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
     
     /// Trackの現在位置から、発話直前に「水平Yaw角[deg]」を再計算
     func liveYawDeg(for track: Track) -> Float? {
+        guard let frame = sceneView.session.currentFrame else { return nil }
         let t = track.worldTransform
-        let p = simd_float3(t.columns.3.x, t.columns.3.y, t.columns.3.z)
+        // 垂直方向は無視して水平面だけで角度を計算する
+        let cameraY = frame.camera.transform.columns.3.y
+        let p = simd_float3(t.columns.3.x, cameraY, t.columns.3.z)
         return self.yawAngleToCameraCenter(worldPos: p)
     }
     
