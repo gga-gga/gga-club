@@ -12,6 +12,7 @@ import UIKit
 final class StartViewController: UIViewController {
 
     @IBOutlet weak var startButton: UIButton!  // Storyboard で接続
+    private var shouldStartGuidanceOnLaunch = false
     
     deinit {
         NotificationCenter.default.removeObserver(self)
@@ -27,6 +28,12 @@ final class StartViewController: UIViewController {
             name: ShortcutAction.start.notificationName,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleShortcutStartGuidance),
+            name: ShortcutAction.startGuidance.notificationName,
+            object: nil
+        )
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -35,14 +42,8 @@ final class StartViewController: UIViewController {
         if ShortcutActionCenter.shared.consume(.start) {
             handleShortcutStart()
         }
-    }
-
-    override func prepare(for segue: UIStoryboardSegue, sender: Any?) {
-        if let destination = segue.destination as? ViewController {
-            destination.isGuidancePaused = true
-        } else if let nav = segue.destination as? UINavigationController,
-                  let destination = nav.viewControllers.first as? ViewController {
-            destination.isGuidancePaused = true
+        if ShortcutActionCenter.shared.consume(.startGuidance) {
+            handleShortcutStartGuidance()
         }
     }
 
@@ -52,6 +53,12 @@ final class StartViewController: UIViewController {
     
     @objc private func handleShortcutStart() {
         guard isViewLoaded else { return }
+        startButton.sendActions(for: .touchUpInside)
+    }
+    
+    @objc private func handleShortcutStartGuidance() {
+        guard isViewLoaded else { return }
+        shouldStartGuidanceOnLaunch = true
         startButton.sendActions(for: .touchUpInside)
     }
 }
