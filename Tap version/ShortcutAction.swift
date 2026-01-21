@@ -10,7 +10,7 @@ import Foundation
 
 enum ShortcutAction: String {
     case start = "start"
-    case startGuidance = "start-guidance"
+    case startGuidance = "startt"
 
     static let scheme = "suwareru"
 
