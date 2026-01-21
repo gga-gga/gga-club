@@ -46,6 +46,22 @@ final class StartViewController: UIViewController {
             handleShortcutStartGuidance()
         }
     }
+    
+    override func prepare(for segue: UIStoryboardSegue, sender: Any?) {
+        super.prepare(for: segue, sender: sender)
+        guard shouldStartGuidanceOnLaunch else { return }
+        let destination: UIViewController
+        if let navigationController = segue.destination as? UINavigationController {
+            destination = navigationController.viewControllers.first ?? navigationController
+        } else {
+            destination = segue.destination
+        }
+        if let viewController = destination as? ViewController {
+            viewController.shouldStartGuidanceOnAppear = true
+        }
+        shouldStartGuidanceOnLaunch = false
+    }
+
 
     @IBAction func onTapStart(_ sender: UIButton) {
         // Storyboard の segue で画面遷移を行う
