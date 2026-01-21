@@ -40,7 +40,8 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
     // 最新ラベル（任意のデバッグ用）
     var latestPrediction: String = "…"
     var isGuidancePaused = true
-
+    var shouldStartGuidanceOnAppear = false
+    
     private var directionFeedback = UIImpactFeedbackGenerator(style: .medium)
     private let arrivalFeedback = UINotificationFeedbackGenerator()
     private var directionHapticTimer: DispatchSourceTimer?
@@ -202,6 +203,10 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
             announceForAccessibility("案内は停止中です。開始ボタンから案内を開始できます。")
         }
         startGuidanceButton.isHidden = !isGuidancePaused
+        if shouldStartGuidanceOnAppear {
+            shouldStartGuidanceOnAppear = false
+            handleShortcutStartGuidance()
+        }
         if ShortcutActionCenter.shared.consume(.startGuidance) {
             handleShortcutStartGuidance()
         }
