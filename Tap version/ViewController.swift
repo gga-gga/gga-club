@@ -1432,11 +1432,20 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
     }
     
     private func situationSummaryText(emptySeatCount: Int, personCount: Int) -> String {
+        let personCountText: String
+        switch personCount {
+        case 1:
+            personCountText = "ひとり"
+        case 2:
+            personCountText = "ふたり"
+        default:
+            personCountText = "\(personCount)人"
+        }
         if emptySeatCount == 0 {
-            return "空席はありません。周囲の人は\(personCount)人です。"
+            return "空席はありません。周囲の人は\(personCountText)です。"
         }
         if personCount == 0 {
-            return "空席は\(emptySeatCount)席です。周囲の人はいません。"
+            return "空席は\(emptySeatCount)席、周囲の人は\(personCountText)です。"
         }
         return "空席は\(emptySeatCount)席、周囲の人は\(personCount)人です。"
     }
