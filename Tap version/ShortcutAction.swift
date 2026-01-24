@@ -1,10 +1,6 @@
-//
 //  ShortcutAction.swift
 //  SUWARERU
-//
 //  Created by Sugitani on 2026/01/21.
-//  Copyright © 2026 CompanyName. All rights reserved.
-//
 
 import Foundation
 
