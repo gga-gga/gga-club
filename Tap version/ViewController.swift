@@ -339,7 +339,6 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
             }
             DispatchQueue.main.async { [weak self] in
                 self?.debugTextView.text = ""
-                self?.debugTextView.accessibilityValue = "検出なし"
                 self?.updateBoundingBoxes(with: [])
             }
             return
@@ -425,7 +424,6 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
         let lines = sorted.prefix(2).map { "\($0.label) - \(Int($0.confidence * 100))%" }.joined(separator: "\n")
         DispatchQueue.main.async {
             self.debugTextView.text = lines
-            self.debugTextView.accessibilityValue = lines.isEmpty ? "検出なし" : lines
             if let first = sorted.first { self.latestPrediction = first.label }
             // このフレームで検出した BBOX を画面に反映
             self.updateBoundingBoxes(with: sorted)
@@ -1362,13 +1360,11 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
         arrivalFinishButton.isAccessibilityElement = true
         arrivalFinishButton.accessibilityLabel = "案内を終了する"
         arrivalFinishButton.accessibilityHint = "空席案内を終了します。"
-
-        TextView.isAccessibilityElement = true
-        TextView.accessibilityLabel = "検出状況"
-        TextView.accessibilityValue = "検出なし"
-
-        debugTextView.isAccessibilityElement = true
-        debugTextView.accessibilityLabel = "検出の詳細"
+        
+        debugTextView.isAccessibilityElement = false
+        debugTextView.accessibilityElementsHidden = true
+        
+        TextView.isAccessibilityElement = false
     }
     
     private func startSituationCheckIfNeeded() {
