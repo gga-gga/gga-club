@@ -64,7 +64,7 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
     let distanceCoeff: CGFloat = 0.60      // 自適応距離しきい値の係数 (0.6 × 長辺)
     let minDistancePx: CGFloat = 24.0      // 自適応距離の下限 (px)
     let smoothingAlpha: Float = 0.15       // 位置スムージング（0=据え置き, 1=即反映）
-    let trackTimeout: TimeInterval = 2.0   // 見失い判定 (秒)
+    let trackTimeout: TimeInterval = 4.0   // 見失い判定 (秒)
     let cooldown: TimeInterval = 0.6       // 同ラベル新規作成のクールダウン (秒)
 
     // ======= 深さ（LiDAR）関連 =======
@@ -148,7 +148,7 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
     private var situationCheckTimer: Timer?
     private var situationEmptySeatCounts: [Int: Int] = [:]
     private var situationPersonCounts: [Int: Int] = [:]
-    private let situationCheckDuration: TimeInterval = 3.0
+    private let situationCheckDuration: TimeInterval = 7.0
     
     deinit {
         NotificationCenter.default.removeObserver(self)
@@ -448,7 +448,20 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
         stateQueue.sync {
             // 安全な掃除
             let staleKeys = self.tracks
-                .filter { time - $0.value.lastSeen > self.trackTimeout }
+                .filter { entry in
+                    let track = entry.value
+                    guard time - track.lastSeen > self.trackTimeout else { return false }
+                    
+                    if self.seatLabels.contains(track.label) {
+                        let liveDistance: Float? = self.sceneView.session.currentFrame == nil
+                        ? nil
+                        : self.liveDistanceMeters(for: track)
+                        if let liveDistance, liveDistance <= 2.0 {
+                            return false
+                        }
+                    }
+                    return true
+                }
                 .map { $0.key }
 
             for key in staleKeys {
