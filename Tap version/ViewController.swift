@@ -144,6 +144,11 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
     var lastProcessTime: TimeInterval = 0
     private var lastEmptySeatCount: Int = 0
     private var lastPersonCount: Int = 0
+    private var isSituationCheckInProgress = false
+    private var situationCheckTimer: Timer?
+    private var maxSituationEmptySeatCount = 0
+    private var maxSituationPersonCount = 0
+    private let situationCheckDuration: TimeInterval = 3.0
     
     deinit {
         NotificationCenter.default.removeObserver(self)
@@ -189,9 +194,6 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
         self.viewSize = self.sceneView.bounds.size
         // 連続推論ループ開始
         self.startCoreMLLoopIfNeeded()
-        if isGuidancePaused {
-            announceForAccessibility("案内は停止中です。開始ボタンから案内を開始できます。")
-        }
         startGuidanceButton.isHidden = !isGuidancePaused
         if shouldStartGuidanceOnAppear {
             shouldStartGuidanceOnAppear = false
@@ -199,6 +201,10 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
         }
         if ShortcutActionCenter.shared.consume(.startGuidance) {
             handleShortcutStartGuidance()
+        }
+        startGuidanceButton.isHidden = !isGuidancePaused
+        if isGuidancePaused {
+            startSituationCheckIfNeeded()
         }
     }
     
@@ -239,6 +245,7 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
         // Timer 停止
         noSeatTimer?.invalidate()
         noSeatTimer = nil
+        stopSituationCheck()
         isMLLoopRunning = false
 
         // 画面を離れるときは読み上げも止める
@@ -325,6 +332,10 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
             stateQueue.sync {
                 self.lastEmptySeatCount = 0
                 self.lastPersonCount = 0
+                if self.isSituationCheckInProgress {
+                    self.maxSituationEmptySeatCount = max(self.maxSituationEmptySeatCount, 0)
+                    self.maxSituationPersonCount = max(self.maxSituationPersonCount, 0)
+                }
                 self.pendingDetections.removeAll()
             }
             DispatchQueue.main.async { [weak self] in
@@ -387,6 +398,10 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
         stateQueue.sync {
             self.lastEmptySeatCount = emptyChairs.count
             self.lastPersonCount = personDetections.count
+            if self.isSituationCheckInProgress {
+                self.maxSituationEmptySeatCount = max(self.maxSituationEmptySeatCount, emptyChairs.count)
+                self.maxSituationPersonCount = max(self.maxSituationPersonCount, personDetections.count)
+            }
         }
         
         guard !filteredDetections.isEmpty else {
@@ -1265,6 +1280,7 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
     @IBAction func onTapStartGuidance(_ sender: UIButton) {
         isGuidancePaused = false
         startGuidanceButton.isHidden = true
+        stopSituationCheck()
         announceForAccessibility("案内を開始します。")
     }
     
@@ -1340,6 +1356,60 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
         debugTextView.isAccessibilityElement = true
         debugTextView.accessibilityLabel = "検出の詳細"
     }
+    
+    private func startSituationCheckIfNeeded() {
+        guard isGuidancePaused else { return }
+        guard !isSituationCheckInProgress else { return }
+
+        stateQueue.sync {
+            isSituationCheckInProgress = true
+            maxSituationEmptySeatCount = 0
+            maxSituationPersonCount = 0
+        }
+
+        interruptAndSpeak(
+            text: "周囲を確認します。",
+            rate: AVSpeechUtteranceDefaultSpeechRate * 1.1,
+            pitch: 0.9,
+            volume: 1.0
+        )
+
+        situationCheckTimer?.invalidate()
+        situationCheckTimer = Timer.scheduledTimer(withTimeInterval: situationCheckDuration, repeats: false) { [weak self] _ in
+            guard let self = self else { return }
+            let summary: String = self.stateQueue.sync {
+                self.isSituationCheckInProgress = false
+                let emptySeats = self.maxSituationEmptySeatCount
+                let people = self.maxSituationPersonCount
+                return self.situationSummaryText(emptySeatCount: emptySeats, personCount: people)
+            }
+            self.interruptAndSpeak(
+                text: "\(summary)案内を開始してください。",
+                rate: AVSpeechUtteranceDefaultSpeechRate * 1.1,
+                pitch: 0.9,
+                volume: 1.0
+            )
+        }
+    }
+
+    private func stopSituationCheck() {
+        situationCheckTimer?.invalidate()
+        situationCheckTimer = nil
+        stateQueue.sync {
+            isSituationCheckInProgress = false
+        }
+    }
+
+    private func situationSummaryText(emptySeatCount: Int, personCount: Int) -> String {
+        if emptySeatCount == 0 {
+            return "空席はありません。周囲の人は\(personCount)人です。"
+        }
+        if personCount == 0 {
+            return "空席は\(emptySeatCount)席です。周囲の人はいません。"
+        }
+        return "空席は\(emptySeatCount)席、周囲の人は\(personCount)人です。"
+    }
+
 
     private func announceForAccessibility(_ message: String) {
         UIAccessibilityPostNotification(UIAccessibilityAnnouncementNotification, message)
