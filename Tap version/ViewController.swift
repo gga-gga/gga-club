@@ -1191,12 +1191,7 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
 
                 self.stopAllTTS()
                 self.sceneView.session.pause()
-
-                if let nav = self.navigationController {
-                    nav.popViewController(animated: true)
-                } else {
-                    self.dismiss(animated: true, completion: nil)
-                }
+                self.transitionToStartViewController()
             }
         }
     }
@@ -1212,7 +1207,11 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
     }
 
     @IBAction func onExit(_ sender: UIButton) {
-
+        prepareForExit()
+        transitionToStartViewController()
+    }
+    
+    private func prepareForExit() {
         // 終了処理中
         isFinishingNavigation = true
 
@@ -1224,7 +1223,10 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
         arrivalPanelRepeatTimer = nil
         noSeatTimer?.invalidate()
         noSeatTimer = nil
+        stopSituationCheck()
         stopDirectionHaptics()
+        
+        isMLLoopRunning = false
         
         // 音声を即停止
         tts.stopSpeaking(at: .immediate)
@@ -1232,10 +1234,13 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
 
         // ARセッション停止
         sceneView.session.pause()
-
+    }
         // 画面を閉じる
+    private func transitionToStartViewController() {
         if let nav = navigationController {
-            nav.popViewController(animated: true)
+            nav.popToRootViewController(animated: true)
+        } else if presentingViewController != nil {
+            dismiss(animated: true, completion: nil)
         } else {
             dismiss(animated: true, completion: nil)
         }
