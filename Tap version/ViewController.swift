@@ -146,8 +146,8 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
     private var lastPersonCount: Int = 0
     private var isSituationCheckInProgress = false
     private var situationCheckTimer: Timer?
-    private var maxSituationEmptySeatCount = 0
-    private var maxSituationPersonCount = 0
+    private var situationEmptySeatCounts: [Int: Int] = [:]
+    private var situationPersonCounts: [Int: Int] = [:]
     private let situationCheckDuration: TimeInterval = 3.0
     
     deinit {
@@ -333,8 +333,7 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
                 self.lastEmptySeatCount = 0
                 self.lastPersonCount = 0
                 if self.isSituationCheckInProgress {
-                    self.maxSituationEmptySeatCount = max(self.maxSituationEmptySeatCount, 0)
-                    self.maxSituationPersonCount = max(self.maxSituationPersonCount, 0)
+                    self.recordSituationCounts(emptySeatCount: 0, personCount: 0)
                 }
                 self.pendingDetections.removeAll()
             }
@@ -399,8 +398,10 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
             self.lastEmptySeatCount = emptyChairs.count
             self.lastPersonCount = personDetections.count
             if self.isSituationCheckInProgress {
-                self.maxSituationEmptySeatCount = max(self.maxSituationEmptySeatCount, emptyChairs.count)
-                self.maxSituationPersonCount = max(self.maxSituationPersonCount, personDetections.count)
+                self.recordSituationCounts(
+                    emptySeatCount: emptyChairs.count,
+                    personCount: personDetections.count
+                )
             }
         }
         
@@ -1363,8 +1364,8 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
 
         stateQueue.sync {
             isSituationCheckInProgress = true
-            maxSituationEmptySeatCount = 0
-            maxSituationPersonCount = 0
+            situationEmptySeatCounts.removeAll()
+            situationPersonCounts.removeAll()
         }
 
         interruptAndSpeak(
@@ -1379,8 +1380,8 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
             guard let self = self else { return }
             let summary: String = self.stateQueue.sync {
                 self.isSituationCheckInProgress = false
-                let emptySeats = self.maxSituationEmptySeatCount
-                let people = self.maxSituationPersonCount
+                let emptySeats = self.modeCount(from: self.situationEmptySeatCounts)
+                let people = self.modeCount(from: self.situationPersonCounts)
                 return self.situationSummaryText(emptySeatCount: emptySeats, personCount: people)
             }
             self.interruptAndSpeak(
@@ -1399,7 +1400,24 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
             isSituationCheckInProgress = false
         }
     }
+    
+    private func recordSituationCounts(emptySeatCount: Int, personCount: Int) {
+        situationEmptySeatCounts[emptySeatCount, default: 0] += 1
+        situationPersonCounts[personCount, default: 0] += 1
+    }
 
+    private func modeCount(from counts: [Int: Int]) -> Int {
+        guard let (value, _) = counts.max(by: { lhs, rhs in
+            if lhs.value == rhs.value {
+                return lhs.key > rhs.key
+            }
+            return lhs.value < rhs.value
+        }) else {
+            return 0
+        }
+        return value
+    }
+    
     private func situationSummaryText(emptySeatCount: Int, personCount: Int) -> String {
         if emptySeatCount == 0 {
             return "空席はありません。周囲の人は\(personCount)人です。"
