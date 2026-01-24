@@ -1,16 +1,6 @@
-//
 //  ViewController 2.swift
 //  SUWARERU
-//
 //  Created by Sugitani on 2026/01/15.
-//  Copyright © 2026 CompanyName. All rights reserved.
-//
-
-
-//
-//  ViewController.swift
-//  CoreML in ARKit
-//
 
 import UIKit
 import SceneKit
