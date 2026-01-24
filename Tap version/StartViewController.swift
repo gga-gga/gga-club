@@ -1,10 +1,6 @@
-//
-//  StartViewController 2.swift
+//  StartViewController.swift
 //  SUWARERU
-//
 //  Created by Sugitani on 2026/01/15.
-//  Copyright © 2026 CompanyName. All rights reserved.
-//
 
 
 import UIKit
