@@ -1352,6 +1352,9 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
         arrivalPanelView.isAccessibilityElement = true
         arrivalPanelView.accessibilityLabel = "到着確認"
         arrivalPanelView.accessibilityHint = "終了するか続けるかを選択してください。"
+        
+        startGuidanceButton.isAccessibilityElement = false
+        startGuidanceButton.accessibilityElementsHidden = true
 
         arrivalContinueButton.isAccessibilityElement = true
         arrivalContinueButton.accessibilityLabel = "案内を続ける"
