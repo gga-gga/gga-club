@@ -20,6 +20,7 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
     @IBOutlet weak var startGuidanceButton: UIButton!
     @IBOutlet weak var arrivalContinueButton: UIButton!
     @IBOutlet weak var arrivalFinishButton: UIButton!
+    @IBOutlet weak var exitButton: UIButton!
     
 
     // MARK: - Scene / Display
@@ -108,9 +109,9 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
     /// 2回目の「終了します」を喋ったか
     var noSeatFinalWarningSpoken = false
     /// 空席ゼロになってから1回目を出すまでの秒数
-    let noSeatFirstDelay: TimeInterval = 6.0
+    let noSeatFirstDelay: TimeInterval = 8.0
     /// 「1回目のアナウンスから」2回目（終了）まで待つ秒数
-    let noSeatAfterFirstDelay: TimeInterval = 8.0
+    let noSeatAfterFirstDelay: TimeInterval = 10.0
 
 
     // ======= データ構造 =======
@@ -1354,9 +1355,7 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
     }
 
     private func configureAccessibility() {
-        arrivalPanelView.isAccessibilityElement = true
-        arrivalPanelView.accessibilityLabel = "到着確認"
-        arrivalPanelView.accessibilityHint = "終了するか続けるかを選択してください。"
+        arrivalPanelView.isAccessibilityElement = false
         
         startGuidanceButton.isAccessibilityElement = false
         startGuidanceButton.accessibilityElementsHidden = true
@@ -1368,6 +1367,14 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
         arrivalFinishButton.isAccessibilityElement = true
         arrivalFinishButton.accessibilityLabel = "案内を終了する"
         arrivalFinishButton.accessibilityHint = "空席案内を終了します。"
+        
+        exitButton.isAccessibilityElement = false
+        exitButton.accessibilityElementsHidden = true
+        
+        arrivalPanelView.accessibilityElements = [
+            arrivalFinishButton as Any,
+            arrivalContinueButton as Any
+        ]
         
         debugTextView.isAccessibilityElement = false
         debugTextView.accessibilityElementsHidden = true
