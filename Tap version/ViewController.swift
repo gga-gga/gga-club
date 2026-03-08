@@ -1344,9 +1344,11 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
             self.arrivalFeedback.notificationOccurred(.success)
             UIAccessibilityPostNotification(UIAccessibilityScreenChangedNotification, self.arrivalPanelView)
 
-            // まず最初の1回をすぐ案内
-            self.speakArrivalPanelGuide()
-
+            let situationCheckAnnouncementDelay: TimeInterval = 1.5
+            DispatchQueue.main.asyncAfter(deadline: .now() + situationCheckAnnouncementDelay) { [weak self] in
+                self?.speakArrivalPanelGuide()
+            }
+            
             // すでにタイマーが動いていたら止める
             self.arrivalPanelRepeatTimer?.invalidate()
 
