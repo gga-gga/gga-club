@@ -1182,7 +1182,7 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
                 self.announceForAccessibility(utt.speechString)
             } else {
                 self.tts.speak(utt)
-                self.announceForAccessibility("空席が見つかりませんでした。案内を終了します。")
+                self.announceForAccessibility("空席が見つかりませんでした。空席ナビを終了します。")
             }
 
             // 少し待ってから自動終了（テキストの長さに合わせて調整）
@@ -1300,7 +1300,7 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
         startGuidanceButton.isHidden = true
         stopSituationCheck()
         updateAccessibilityForCurrentState()
-        announceForAccessibility("案内を開始します。")
+
     }
     
     @objc private func handleShortcutStartGuidance() {
@@ -1318,7 +1318,6 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
             self.arrivalPanelView.isHidden = false
             self.updateAccessibilityForCurrentState()
             self.arrivalFeedback.notificationOccurred(.success)
-            self.announceForAccessibility("空席に到着しました。終了するか続けるか選択してください。")
             UIAccessibilityPostNotification(UIAccessibilityScreenChangedNotification, self.arrivalPanelView)
 
             // まず最初の1回をすぐ案内
@@ -1360,20 +1359,20 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
         arrivalPanelView.isAccessibilityElement = false
         
         startGuidanceButton.isAccessibilityElement = true
-        startGuidanceButton.accessibilityLabel = "案内を開始"
-        startGuidanceButton.accessibilityHint = "空席案内を開始します。"
+        startGuidanceButton.accessibilityLabel = "空席誘導"
+        startGuidanceButton.accessibilityHint = "空席への誘導を開始します。"
 
         arrivalContinueButton.isAccessibilityElement = true
-        arrivalContinueButton.accessibilityLabel = "案内を続ける"
+        arrivalContinueButton.accessibilityLabel = "継続"
         arrivalContinueButton.accessibilityHint = "空席案内を続行します。"
 
         arrivalFinishButton.isAccessibilityElement = true
-        arrivalFinishButton.accessibilityLabel = "案内を終了する"
+        arrivalFinishButton.accessibilityLabel = "終了"
         arrivalFinishButton.accessibilityHint = "空席案内を終了します。"
         
         exitButton.isAccessibilityElement = true
-        exitButton.accessibilityLabel = "終了"
-        exitButton.accessibilityHint = "案内を中断して開始画面に戻ります。"
+        exitButton.accessibilityLabel = "ナビ中断"
+        exitButton.accessibilityHint = "中断して開始画面に戻ります。"
         
         arrivalPanelView.accessibilityElements = [
             arrivalFinishButton as Any,
@@ -1420,14 +1419,15 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
             situationEmptySeatCounts.removeAll()
             situationPersonCounts.removeAll()
         }
-
-        interruptAndSpeak(
-            text: "周囲を確認します。",
-            rate: AVSpeechUtteranceDefaultSpeechRate * 1.1,
-            pitch: 0.9,
-            volume: 1.0
-        )
-
+        let situationCheckAnnouncementDelay: TimeInterval = 1.0
+        DispatchQueue.main.asyncAfter(deadline: .now() + situationCheckAnnouncementDelay) { [weak self] in
+            self?.interruptAndSpeak(
+                text: "空席と人数の計測をしています。",
+                rate: AVSpeechUtteranceDefaultSpeechRate * 1.1,
+                pitch: 0.9,
+                volume: 1.0
+            )
+        }
         situationCheckTimer?.invalidate()
         situationCheckTimer = Timer.scheduledTimer(withTimeInterval: situationCheckDuration, repeats: false) { [weak self] _ in
             guard let self = self else { return }
@@ -1438,7 +1438,7 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
                 return self.situationSummaryText(emptySeatCount: emptySeats, personCount: people)
             }
             self.interruptAndSpeak(
-                text: "\(summary)案内を開始してください。",
+                text: "\(summary)背面を3回タップして案内を開始してください。",
                 rate: AVSpeechUtteranceDefaultSpeechRate * 1.1,
                 pitch: 0.9,
                 volume: 1.0
