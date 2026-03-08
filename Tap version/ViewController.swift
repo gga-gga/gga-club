@@ -637,7 +637,16 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
     /// 1秒ごとに呼ばれて、空席がしばらく見つからないときにアナウンスする
     @objc func checkNoSeatState() {
         let now = CACurrentMediaTime()
-
+        
+        // フェーズ3（案内中）以外では座席なし監視を進めない
+         if isGuidancePaused {
+             noSeatStartTime = nil
+             noSeatFirstWarningSpoken = false
+             noSeatFirstWarningTime = nil
+             noSeatFinalWarningSpoken = false
+             return
+         }
+        
         // 座席としてカウントするTrackが1つでもあるか？
         let hasSeat = self.tracks.values.contains { tr in
             seatLabels.contains(tr.label)
@@ -1131,11 +1140,11 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
         // パネル中はしゃべらない
         if isAwaitingArrivalDecision || isGuidancePaused { return }
         if isVoiceOverRunning() {
-            announceForAccessibility("空席が見つかりません。カメラで左右を写してください。")
+            announceForAccessibility("空席が消失しました。カメラで左右を写して空席を探してください。")
             return
         }
         interruptAndSpeak(
-            text: "空席が見つかりません。カメラで左右を写してください。",
+            text: "空席が消失しました。カメラで左右を写して空席を探してください。",
             rate: AVSpeechUtteranceDefaultSpeechRate * 1.1,
             pitch: 0.9,
             volume: 1.0
@@ -1300,6 +1309,21 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
         startGuidanceButton.isHidden = true
         stopSituationCheck()
         updateAccessibilityForCurrentState()
+        
+        noSeatStartTime = CACurrentMediaTime()
+        noSeatFirstWarningSpoken = false
+        noSeatFirstWarningTime = nil
+        noSeatFinalWarningSpoken = false
+        
+        let situationCheckAnnouncementDelay: TimeInterval = 1.5
+        DispatchQueue.main.asyncAfter(deadline: .now() + situationCheckAnnouncementDelay) { [weak self] in
+            self?.interruptAndSpeak(
+                text: "空席への誘導を開始します。",
+                rate: AVSpeechUtteranceDefaultSpeechRate * 1.1,
+                pitch: 0.9,
+                volume: 1.0
+            )
+        }
 
     }
     
@@ -1422,7 +1446,7 @@ final class ViewController: UIViewController, ARSCNViewDelegate,AVSpeechSynthesi
         let situationCheckAnnouncementDelay: TimeInterval = 1.0
         DispatchQueue.main.asyncAfter(deadline: .now() + situationCheckAnnouncementDelay) { [weak self] in
             self?.interruptAndSpeak(
-                text: "空席と人数の計測をしています。",
+                text: "人数と空席数の計測をしています。",
                 rate: AVSpeechUtteranceDefaultSpeechRate * 1.1,
                 pitch: 0.9,
                 volume: 1.0
