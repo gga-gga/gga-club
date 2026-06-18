@@ -1,4 +1,4 @@
-# GGA Club / Tap version
+# 空席ナビアプリ
 
 ARKit と Core ML を使って、**空席の椅子を検出し音声・ハプティクスで誘導する iOS アプリ**です。  
 `Tap version` 配下に Xcode プロジェクトの主要ソースがあります。
