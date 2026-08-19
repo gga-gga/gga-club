@@ -21,10 +21,13 @@ enum OGMConfig {
     static let floorMarginMeters: Float = 0.08
     static let overheadHeightMeters: Float = 2.0 // H_max：想定ユーザー身長+吊り革高さ
 
-    // 深度取得の最小有効距離（3章の関連対策）
+    // 深度取得の有効距離レンジ（3章の関連対策）
     // カメラ直近・浅い入射角の床は特にノイズが大きく、誤って占有候補になりやすいため、
     // 極端に近い点は最初から除外する
     static let minValidRangeMeters: Float = 0.25
+    // LiDAR(ARKit sceneDepth)は3.5mを超えるあたりから精度が落ちるとされるため、
+    // それより遠い点は「未検出」として扱い、誤検出のリスクを避ける（仮値、要実測調整）
+    static let maxValidRangeMeters: Float = 3.5
 
     // 持続性カウンタ（5.1/5.2）
     static let stableDurationSeconds: TimeInterval = 2.5 // T_stable（2〜3秒の中間値、仮値）

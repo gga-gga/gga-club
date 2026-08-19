@@ -74,7 +74,9 @@ final class DepthPointCloudExtractor {
                 }
 
                 let depth = depthBuf[y * depthRowStride + x]
-                if depth.isFinite, depth >= OGMConfig.minValidRangeMeters {
+                if depth.isFinite,
+                   depth >= OGMConfig.minValidRangeMeters,
+                   depth <= OGMConfig.maxValidRangeMeters {
                     let u = Float(x), v = Float(y)
                     // ピンホールカメラモデルで逆投影（[2]）
                     let xc = (u - cx) / fx * depth
