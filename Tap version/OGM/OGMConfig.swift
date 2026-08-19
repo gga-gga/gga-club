@@ -29,6 +29,10 @@ enum OGMConfig {
     // それより遠い点は「未検出」として扱い、誤検出のリスクを避ける（仮値、要実測調整）
     static let maxValidRangeMeters: Float = 3.5
 
+    // 深度エッジ（壁のシルエット等）でのスムージングにより生じる「浮遊画素」対策。
+    // 隣接画素との深度差がこれを超える場合は、実在しない中間距離の点とみなして破棄する
+    static let maxDepthDiscontinuityMeters: Float = 0.5
+
     // 持続性カウンタ（5.1/5.2）
     static let stableDurationSeconds: TimeInterval = 2.5 // T_stable（2〜3秒の中間値、仮値）
 

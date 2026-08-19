@@ -19,8 +19,13 @@ final class DepthPointCloudExtractor {
     /// 実機テストで、円状に誤って占有判定されるセルが確認された。カメラ近傍・浅い入射角の
     /// 床面はLiDARのノイズが乗りやすく、`.medium`まで許可すると誤検出が入りやすいため、
     /// `.high`のみ採用するよう厳しくした。
+    ///
+    /// また、壁の向こう側が誤って「空き」判定されるバグの原因調査により、
+    /// smoothedSceneDepth（空間・時間平滑化あり）は壁のシルエット等の深度エッジで
+    /// 手前と奥の深度を混ぜた「浮遊画素」を生成しやすいことが分かったため、
+    /// OGM用の点群抽出では生の sceneDepth を優先する。
     func extractWorldPoints(from frame: ARFrame) -> [simd_float3] {
-        guard let depthData = frame.smoothedSceneDepth ?? frame.sceneDepth else { return [] }
+        guard let depthData = frame.sceneDepth ?? frame.smoothedSceneDepth else { return [] }
         let depthMap = depthData.depthMap
         let confidenceMap = depthData.confidenceMap
 
@@ -74,9 +79,22 @@ final class DepthPointCloudExtractor {
                 }
 
                 let depth = depthBuf[y * depthRowStride + x]
-                if depth.isFinite,
-                   depth >= OGMConfig.minValidRangeMeters,
-                   depth <= OGMConfig.maxValidRangeMeters {
+                let isValidRange = depth.isFinite
+                    && depth >= OGMConfig.minValidRangeMeters
+                    && depth <= OGMConfig.maxValidRangeMeters
+
+                // 深度エッジの浮遊画素対策：隣接画素と深度が大きく飛んでいる場合は、
+                // 手前と奥の面が混ざった実在しない中間距離の点とみなして破棄する
+                var isDiscontinuous = false
+                if isValidRange, x + 1 < width {
+                    let neighborDepth = depthBuf[y * depthRowStride + (x + 1)]
+                    if neighborDepth.isFinite,
+                       abs(neighborDepth - depth) > OGMConfig.maxDepthDiscontinuityMeters {
+                        isDiscontinuous = true
+                    }
+                }
+
+                if isValidRange, !isDiscontinuous {
                     let u = Float(x), v = Float(y)
                     // ピンホールカメラモデルで逆投影（[2]）
                     let xc = (u - cx) / fx * depth
