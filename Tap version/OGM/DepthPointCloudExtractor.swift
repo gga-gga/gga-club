@@ -15,7 +15,10 @@ final class DepthPointCloudExtractor {
     }
 
     /// 深度マップ + 信頼度マップからワールド座標点群を抽出する。
-    /// confidenceMap が `.low` の画素は破棄する（[1]）。
+    /// confidenceMap が `.high` 未満の画素は破棄する（[1]）。
+    /// 実機テストで、円状に誤って占有判定されるセルが確認された。カメラ近傍・浅い入射角の
+    /// 床面はLiDARのノイズが乗りやすく、`.medium`まで許可すると誤検出が入りやすいため、
+    /// `.high`のみ採用するよう厳しくした。
     func extractWorldPoints(from frame: ARFrame) -> [simd_float3] {
         guard let depthData = frame.smoothedSceneDepth ?? frame.sceneDepth else { return [] }
         let depthMap = depthData.depthMap
@@ -64,14 +67,14 @@ final class DepthPointCloudExtractor {
             while x < width {
                 if let confidenceBuf {
                     let confidence = confidenceBuf[y * confidenceRowStride + x]
-                    if confidence < UInt8(ARConfidenceLevel.medium.rawValue) {
+                    if confidence < UInt8(ARConfidenceLevel.high.rawValue) {
                         x += pixelStride
                         continue
                     }
                 }
 
                 let depth = depthBuf[y * depthRowStride + x]
-                if depth.isFinite, depth > 0 {
+                if depth.isFinite, depth >= OGMConfig.minValidRangeMeters {
                     let u = Float(x), v = Float(y)
                     // ピンホールカメラモデルで逆投影（[2]）
                     let xc = (u - cx) / fx * depth

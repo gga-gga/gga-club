@@ -16,8 +16,15 @@ enum OGMConfig {
 
     // 高さフィルタ（3章）
     // 0にせず遊びを持たせる理由：LiDAR測定誤差・RANSAC残差・床面の微小凹凸を吸収するため
-    static let floorMarginMeters: Float = 0.05
+    // 実機テストでカメラ近傍の床が誤って占有判定される事例が確認されたため、
+    // 当初の仮値(0.05)より広げてある（近距離・浅い入射角の床は深度ノイズが乗りやすい）
+    static let floorMarginMeters: Float = 0.08
     static let overheadHeightMeters: Float = 2.0 // H_max：想定ユーザー身長+吊り革高さ
+
+    // 深度取得の最小有効距離（3章の関連対策）
+    // カメラ直近・浅い入射角の床は特にノイズが大きく、誤って占有候補になりやすいため、
+    // 極端に近い点は最初から除外する
+    static let minValidRangeMeters: Float = 0.25
 
     // 持続性カウンタ（5.1/5.2）
     static let stableDurationSeconds: TimeInterval = 2.5 // T_stable（2〜3秒の中間値、仮値）
