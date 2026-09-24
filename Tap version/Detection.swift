@@ -3,20 +3,15 @@
 //  SUWARERU
 //
 //  Created by Sugitani on 2026/01/15.
-//  Copyright © 2026 CompanyName. All rights reserved.
 //
-
-
-//
-//  TrackingModels.swift
-//  SUWARERU
-//
-//  Created by Sugitani on 2026/01/15.
+//  検出（Detection）とトラック（Track）のデータ構造。
+//  以前は ViewController 内にも同名のネスト型があり二重定義になっていたため、ここに一本化した。
 //
 
 import CoreGraphics
 import Foundation
 import SceneKit
+import simd
 
 struct Detection {
     let id: UUID
