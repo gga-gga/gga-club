@@ -25,8 +25,14 @@ struct Detection {
     let screenPoint: CGPoint   // 画面中心（UIKit座標）
     let screenRect: CGRect     // 画面上BBox（UIKit座標）
     let t: TimeInterval
-    /// 推論に使ったのと同じフレームの深度から求めた3D位置（取れなければ nil）
-    var placement: SeatPlacement? = nil
+    /// 推論に使ったのと同じフレームの深度から求めた座面の推定結果（空席候補のみ。未計算なら nil）
+    var localization: SeatLocalization? = nil
+
+    /// 座面の3D位置（推定できていなければ nil）
+    var placement: SeatPlacement? {
+        if case .located(let placement)? = localization { return placement }
+        return nil
+    }
 }
 
 struct Track {

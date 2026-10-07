@@ -34,6 +34,17 @@ enum ImageCoordinates {
         }
     }
 
+    /// Vision座標の矩形 → native座標の矩形（向きの変換は90°単位の回転・反転なので4隅の外接矩形で正確に求まる）
+    static func nativeRect(fromVision rect: CGRect, orientation: CGImagePropertyOrientation) -> CGRect {
+        let corners = [
+            CGPoint(x: rect.minX, y: rect.minY),
+            CGPoint(x: rect.maxX, y: rect.maxY)
+        ].map { nativePoint(fromVision: $0, orientation: orientation) }
+        let minX = min(corners[0].x, corners[1].x), maxX = max(corners[0].x, corners[1].x)
+        let minY = min(corners[0].y, corners[1].y), maxY = max(corners[0].y, corners[1].y)
+        return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
+    }
+
     /// native座標 → 画面座標。displayTransform は frame.displayTransform(for:viewportSize:) の値
     /// （native正規化座標 → 画面正規化座標の変換で、aspect-fill の切り取りも含む）。
     static func screenPoint(fromNative p: CGPoint,

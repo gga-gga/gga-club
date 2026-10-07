@@ -101,6 +101,8 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
     // ======= 占有格子地図（OGM） =======
     let ogmEngine = OGMNavigationEngine()
     var lastOGMUpdateTime: TimeInterval = 0
+    /// OGM が推定した床の高さ。座面の推定（推論スレッド）から読むので stateQueue で保護する
+    var latestFloorY: Float?
 
     deinit {
         NotificationCenter.default.removeObserver(self)

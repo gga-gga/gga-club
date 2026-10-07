@@ -52,12 +52,22 @@ final class BoundingBoxOverlayView: UIView {
             drawnLayers.append(boxLayer)
         }
 
+        // 色と大きさが同じマーカーは1枚のレイヤーにまとめて描く（座面の点は数十個あるため）
+        var groups: [(color: UIColor, radius: CGFloat, path: UIBezierPath)] = []
         for marker in markers {
-            let markerLayer = CAShapeLayer()
             let r = marker.radius
-            let circle = CGRect(x: marker.point.x - r, y: marker.point.y - r, width: r * 2, height: r * 2)
-            markerLayer.path = UIBezierPath(ovalIn: circle).cgPath
-            markerLayer.strokeColor = marker.color.cgColor
+            let circle = UIBezierPath(ovalIn: CGRect(x: marker.point.x - r, y: marker.point.y - r,
+                                                     width: r * 2, height: r * 2))
+            if let index = groups.firstIndex(where: { $0.color == marker.color && $0.radius == r }) {
+                groups[index].path.append(circle)
+            } else {
+                groups.append((color: marker.color, radius: r, path: circle))
+            }
+        }
+        for group in groups {
+            let markerLayer = CAShapeLayer()
+            markerLayer.path = group.path.cgPath
+            markerLayer.strokeColor = group.color.cgColor
             markerLayer.fillColor = UIColor.clear.cgColor
             markerLayer.lineWidth = 2.0
             layer.addSublayer(markerLayer)

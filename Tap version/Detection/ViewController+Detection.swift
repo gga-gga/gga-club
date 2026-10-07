@@ -76,13 +76,16 @@ extension ViewController {
                                            displayTransform: displayTransform,
                                            viewSize: viewportSize,
                                            timestamp: now)
-        // 空席候補だけ、同じフレームの深度から3D位置を求めておく
+        // 空席候補だけ、同じフレームの深度から座面の3D位置を求めておく
+        let floorY = stateQueue.sync { self.latestFloorY }
         let emptyChairs = result.emptyChairs.map { chair -> Detection in
             var chair = chair
-            chair.placement = WorldPositionEstimator.estimatePlacement(for: chair,
-                                                                       frame: frame,
-                                                                       interfaceOrientation: orientationForDisplay,
-                                                                       viewportSize: viewportSize)
+            chair.localization = WorldPositionEstimator.estimatePlacement(for: chair,
+                                                                          persons: result.persons,
+                                                                          floorY: floorY,
+                                                                          frame: frame,
+                                                                          interfaceOrientation: orientationForDisplay,
+                                                                          viewportSize: viewportSize)
             return chair
         }
 
@@ -111,19 +114,26 @@ extension ViewController {
             self.pendingDetections.append(contentsOf: emptyChairs)
         }
 
-        // デバッグ表示：信頼度、3D位置の再投影誤差[pt]、水平距離
+        // デバッグ表示：信頼度、座面の点の数・広がり・水平距離、または推定できなかった理由
         let lines = emptyChairs.prefix(2).map { det -> String in
             let head = "\(det.label) - \(Int(det.confidence * 100))%"
-            guard let placement = det.placement else { return "\(head) | 位置なし" }
-            let error = String(format: "%.0f", placement.reprojectionError)
-            let distance = String(format: "%.2f", placement.horizontalDistance)
-            return "\(head) | 誤差 \(error)pt | \(distance)m"
+            switch det.localization {
+            case .located(let placement)?:
+                let spread = String(format: "幅%.2f 奥%.2f", placement.lateralExtent, placement.depthExtent)
+                let distance = String(format: "%.2f", placement.horizontalDistance)
+                return "\(head) | 座面\(placement.surfacePointCount)点 \(spread) | \(distance)m"
+            case .failed(let failure)?:
+                return "\(head) | ✕\(failure.debugText)"
+            case nil:
+                return head
+            }
         }.joined(separator: "\n")
-        // 緑の大きい輪＝深度を読んだ点、赤の小さい輪＝求めた3D位置を投影し直した点
-        // （正しければ赤が緑の輪の中心に入る）
-        let markers = emptyChairs.compactMap { $0.placement }.flatMap { placement in
-            [BoundingBoxOverlayView.Marker(point: placement.expectedScreenPoint, color: .systemGreen, radius: 10),
-             BoundingBoxOverlayView.Marker(point: placement.reprojectedScreenPoint, color: .systemRed, radius: 4)]
+        // 緑の小さい点＝座面と判定した点（間引き済み）、赤の輪＝推定した座面の中心
+        // （正しければ緑は座面の上だけに乗り、赤はその中央に来る）
+        let markers = emptyChairs.compactMap { $0.placement }.flatMap { placement -> [BoundingBoxOverlayView.Marker] in
+            placement.surfaceScreenPoints.map {
+                BoundingBoxOverlayView.Marker(point: $0, color: .systemGreen, radius: 2)
+            } + [BoundingBoxOverlayView.Marker(point: placement.centerScreenPoint, color: .systemRed, radius: 8)]
         }
         DispatchQueue.main.async {
             self.debugTextView.text = lines

@@ -15,7 +15,9 @@ import Vision
 struct SeatDetectionResult {
     /// person と重なっていない chair（空席候補）。信頼度の高い順
     let emptyChairs: [Detection]
-    let personCount: Int
+    /// 同じフレームの person（座面推定で重なる画素を除外するのに使う）
+    let persons: [Detection]
+    var personCount: Int { persons.count }
 }
 
 final class SeatDetector {
@@ -96,7 +98,7 @@ final class SeatDetector {
             .filter { !isChairOccupied($0, persons: personDetections) }
             .sorted { $0.confidence > $1.confidence }
 
-        return SeatDetectionResult(emptyChairs: emptyChairs, personCount: personDetections.count)
+        return SeatDetectionResult(emptyChairs: emptyChairs, persons: personDetections)
     }
 
     /// chair のBBOXに person が重なっていたら「埋まっている」とみなす

@@ -2,7 +2,7 @@
 //  ViewController+OGM.swift
 //  SUWARERU
 //
-//  占有格子地図（OGM）の更新。現時点では地図を作るだけで、案内には使っていない。
+//  占有格子地図（OGM）の更新。地図はまだ案内には使っておらず、床の高さだけを座面の推定に渡している。
 //
 
 import ARKit
@@ -14,5 +14,10 @@ extension ViewController {
         lastOGMUpdateTime = time
         guard let frame = sceneView.session.currentFrame else { return }
         ogmEngine.update(frame: frame, timestamp: time)
+
+        let floorY = ogmEngine.floorY
+        stateQueue.sync {
+            self.latestFloorY = floorY
+        }
     }
 }

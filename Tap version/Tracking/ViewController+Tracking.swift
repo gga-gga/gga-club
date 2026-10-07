@@ -102,13 +102,11 @@ extension ViewController {
                     }
                     if recentSame { continue }
 
-                    // 本当に新規作成（3D位置が取れていない検出からは作らない）
+                    // 本当に新規作成（座面の位置が推定できていない検出からは作らない。
+                    // 座面は床からの高さで絞り込み済みなので、以前の「床の誤ヒット除外」は不要）
                     guard let placement = placement else { continue }
 
                     let worldPos = placement.worldPosition
-                    if WorldPositionEstimator.isLikelyFloorPosition(worldPos, cameraPosition: placement.cameraPosition) {
-                        continue
-                    }
                     var wt = matrix_identity_float4x4
                     wt.columns.3 = simd_float4(worldPos.x, worldPos.y, worldPos.z, 1)
                     let depth = placement.horizontalDistance
