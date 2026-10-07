@@ -1,30 +1,33 @@
 //
 //  DepthPointCloudExtractor.swift
-//  占有格子地図（OGM）— 深度取得〜ワールド座標変換（[1]〜[3]）
+//  占有格子地図（OGM）— 深度取得〜ワールド座標変換＋法線ベクトル推定
 //
 
 import ARKit
 import simd
 
+/// ワールド座標系での1点と、その点における法線ベクトル（正規化済み）
+struct DepthPoint {
+    let worldPosition: simd_float3
+    let worldNormal: simd_float3
+}
+
 final class DepthPointCloudExtractor {
     /// 画素間引き幅（全画素を使うと重いため）
     let pixelStride: Int
+    /// 法線推定に使う近傍画素までのオフセット
+    private let normalSampleOffset: Int = 2
 
     init(pixelStride: Int = 4) {
         self.pixelStride = pixelStride
     }
 
-    /// 深度マップ + 信頼度マップからワールド座標点群を抽出する。
+    /// 深度マップ + 信頼度マップからワールド座標点群＋法線を抽出する。
     /// confidenceMap が `.high` 未満の画素は破棄する（[1]）。
-    /// 実機テストで、円状に誤って占有判定されるセルが確認された。カメラ近傍・浅い入射角の
-    /// 床面はLiDARのノイズが乗りやすく、`.medium`まで許可すると誤検出が入りやすいため、
-    /// `.high`のみ採用するよう厳しくした。
     ///
-    /// また、壁の向こう側が誤って「空き」判定されるバグの原因調査により、
     /// smoothedSceneDepth（空間・時間平滑化あり）は壁のシルエット等の深度エッジで
-    /// 手前と奥の深度を混ぜた「浮遊画素」を生成しやすいことが分かったため、
-    /// OGM用の点群抽出では生の sceneDepth を優先する。
-    func extractWorldPoints(from frame: ARFrame) -> [simd_float3] {
+    /// 手前と奥の深度を混ぜた「浮遊画素」を生成しやすいため、生の sceneDepth を優先する。
+    func extractPoints(from frame: ARFrame) -> [DepthPoint] {
         guard let depthData = frame.sceneDepth ?? frame.smoothedSceneDepth else { return [] }
         let depthMap = depthData.depthMap
         let confidenceMap = depthData.confidenceMap
@@ -62,8 +65,25 @@ final class DepthPointCloudExtractor {
         let cy = intr.columns.2.y * sy
 
         let cameraToWorld = frame.camera.transform
+        let rotation = simd_float3x3(
+            simd_float3(cameraToWorld.columns.0.x, cameraToWorld.columns.0.y, cameraToWorld.columns.0.z),
+            simd_float3(cameraToWorld.columns.1.x, cameraToWorld.columns.1.y, cameraToWorld.columns.1.z),
+            simd_float3(cameraToWorld.columns.2.x, cameraToWorld.columns.2.y, cameraToWorld.columns.2.z)
+        )
 
-        var points: [simd_float3] = []
+        func cameraSpacePoint(_ px: Int, _ py: Int) -> simd_float3? {
+            guard px >= 0, px < width, py >= 0, py < height else { return nil }
+            let d = depthBuf[py * depthRowStride + px]
+            guard d.isFinite, d > 0 else { return nil }
+            let u = Float(px), v = Float(py)
+            // 画像座標(vは下向きに増える) → ARKitカメラ座標(Yは上向き)なので、
+            // ZだけでなくYも符号反転が必要（Apple公式点群サンプルのflipYZに相当）。
+            // Yの反転が欠けていたことが、縦持ち時にカメラYが左右方向を向くために
+            // 「地図が左右鏡映になる」バグの根本原因だった。
+            return simd_float3((u - cx) / fx * d, -(v - cy) / fy * d, -d)
+        }
+
+        var points: [DepthPoint] = []
         points.reserveCapacity((width / pixelStride) * (height / pixelStride))
 
         var y = 0
@@ -94,17 +114,32 @@ final class DepthPointCloudExtractor {
                     }
                 }
 
-                if isValidRange, !isDiscontinuous {
-                    let u = Float(x), v = Float(y)
-                    // ピンホールカメラモデルで逆投影（[2]）
-                    let xc = (u - cx) / fx * depth
-                    let yc = (v - cy) / fy * depth
-                    let zc = -depth // ARKitのカメラ座標系は -Z が前方
-                    let camPoint = simd_float4(xc, yc, zc, 1.0)
+                if isValidRange, !isDiscontinuous,
+                   let center = cameraSpacePoint(x, y),
+                   let right = cameraSpacePoint(x + normalSampleOffset, y),
+                   let down = cameraSpacePoint(x, y + normalSampleOffset) {
+                    // 法線計算に使う近傍画素自体が深度エッジ（壁の縁など）をまたいでいると、
+                    // 手前と奥の面が混ざった出鱈目な法線になり、実際は壁の奥にある点の
+                    // 法線が誤ってwalkable/non-walkable判定を誤らせる（壁の奥数セルが
+                    // 誤って占有になる不具合の原因）。近傍画素の深度差もチェックして、
+                    // 断絶をまたぐ場合はこの点自体を破棄する。
+                    let rightJump = abs(abs(right.z) - abs(center.z)) > OGMConfig.maxDepthDiscontinuityMeters
+                    let downJump = abs(abs(down.z) - abs(center.z)) > OGMConfig.maxDepthDiscontinuityMeters
 
-                    // camera-to-world 行列を適用（[3]）
-                    let worldPoint = cameraToWorld * camPoint
-                    points.append(simd_float3(worldPoint.x, worldPoint.y, worldPoint.z))
+                    // 深度画像の近傍画素から法線を推定する（構造化点群向けの簡易手法）[30]
+                    let tangentRight = right - center
+                    let tangentDown = down - center
+                    let normalCamera = simd_cross(tangentRight, tangentDown)
+                    let normalLength = simd_length(normalCamera)
+
+                    if !rightJump, !downJump, normalLength > 1e-6 {
+                        let worldPoint = cameraToWorld * simd_float4(center.x, center.y, center.z, 1.0)
+                        let worldNormal = simd_normalize(rotation * (normalCamera / normalLength))
+                        points.append(DepthPoint(
+                            worldPosition: simd_float3(worldPoint.x, worldPoint.y, worldPoint.z),
+                            worldNormal: worldNormal
+                        ))
+                    }
                 }
                 x += pixelStride
             }

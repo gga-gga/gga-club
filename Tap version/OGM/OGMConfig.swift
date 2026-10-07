@@ -14,12 +14,13 @@ enum OGMConfig {
     // グリッド
     static let cellSize: Float = 0.15 // m（Corridor-Walker準拠の仮値）
 
-    // 高さフィルタ（3章）
-    // 0にせず遊びを持たせる理由：LiDAR測定誤差・RANSAC残差・床面の微小凹凸を吸収するため
-    // 実機テストでカメラ近傍の床が誤って占有判定される事例が確認されたため、
-    // 当初の仮値(0.05)より広げてある（近距離・浅い入射角の床は深度ノイズが乗りやすい）
-    static let floorMarginMeters: Float = 0.08
-    static let overheadHeightMeters: Float = 2.0 // H_max：想定ユーザー身長+吊り革高さ
+    // walkable判定（先行研究 Corridor-Walker Section 4.1 準拠）
+    // 高さが床から±この範囲以内、かつ法線ベクトルが重力方向とほぼ平行な点だけをwalkableとする。
+    // 論文の値そのまま（ε=0.1m）。オーバーヘッド構造物の別カテゴリは論文には無いため廃止：
+    // 高さ+法線どちらかの条件を満たさない点は全てnon-walkable扱いになる。
+    static let walkableHeightToleranceMeters: Float = 0.1
+    // 法線とワールドUp(0,1,0)の内積の絶対値がこれ以上なら「重力方向とほぼ平行」とみなす
+    static let walkableNormalAlignmentThreshold: Float = 0.85
 
     // 深度取得の有効距離レンジ（3章の関連対策）
     // カメラ直近・浅い入射角の床は特にノイズが大きく、誤って占有候補になりやすいため、
@@ -33,26 +34,41 @@ enum OGMConfig {
     // 隣接画素との深度差がこれを超える場合は、実在しない中間距離の点とみなして破棄する
     static let maxDepthDiscontinuityMeters: Float = 0.5
 
-    // 持続性カウンタ（5.1/5.2）
-    static let stableDurationSeconds: TimeInterval = 2.5 // T_stable（2〜3秒の中間値、仮値）
-
-    // 適応的マージン（5.3）
-    static let stableMarginCells: Int = 1
-    static let unstableMarginCells: Int = 3 // 2〜3セルの上限を採用（安全側に倒す）
-
-    // コスト関数（5.3, Corridor-Walker Section 4.2準拠）
+    // コスト関数（Corridor-Walker Section 4.2.1）
+    // cost = β(1 - (δ-1)/α)  （1 ≤ δ ≤ α）、δ > α では 0。δ=障害物までのセル距離。
+    // δ=1→50, 2→33.3, 3→16.7, 4→0
     static let costAlpha: Float = 3.0
     static let costBeta: Float = 50.0
 
-    // log-odds occupancy（観測駆動、4.2）
-    // 占有側の閾値を低く設定しているのは意図的：
-    // 「正確な地図」より「安全な誘導」を優先する設計方針（0章）に基づき、
-    // 1回の占有観測でも早めに障害物として扱い回避優先にするため。
-    static let logOddsOccupiedIncrement: Float = 0.85
-    static let logOddsFreeIncrement: Float = -0.4
-    static let logOddsMin: Float = -6.0
-    static let logOddsMax: Float = 6.0
-    static let logOddsOccupiedThreshold: Float = 0.5
+    // 経路計画時の占有膨張。「通行不可にする半径」と「コストを付ける半径」は別物なので分ける。
+    // 以前は1つの値が両方を兼ねており、膨張範囲内が常に通行不可になっていたため、
+    // コスト勾配がA*に一度も届いていなかった（論文4.2.1は膨張で塞がずコストのみを付ける）。
+    //
+    // 通行不可にする半径：人体半幅相当の2セル=0.30m（仮値、車内で実測して確定）。
+    // ロングシート車の通路幅1.94mに対し、両側0.30mずつ塞いでも1.34m残る。
+    static let blockedMarginCells: Int = 2
+    // コストを付ける半径：δ > α で0になるので、αセルまで正のコストが付く。
+    static let costMarginCells: Int = Int(costAlpha)
+
+    // セルの占有判定は、そのセルに直接投影されたwalkable/non-walkable点を
+    // 1つの符号付きスコア（CellState.score）に集約し、0以下なら占有とする
+    // （CellState.isOccupied参照）。walkable/nonWalkableそれぞれを独立にカウントして
+    // 別々に上限クランプする方式は撤廃した：両側に同じ上限をかけると、片方が上限に
+    // 張り付いた状態でもう片方も同じ上限までしか追いつけず、N対N（同数=占有）で
+    // 永久に固定されてしまう欠陥があった（実機で確認済み。緑=walkableが明らかに
+    // 多く観測されても占有のまま戻らない不具合として現れた）。
+    // レイキャストによる中間セルの空き推定（Bresenham）は先行研究の記述に無いため撤廃した。
+    // log-odds加算＋連続一致ゲート方式も、壁際が白黒まだらになる問題が
+    // 解消しなかったため撤廃した。
+
+    // セルスコアの上下限。無制限だと、誤って占有側に大きく振れたセルは、
+    // それを上回る回数の反対観測がない限り訂正できず実質固定されてしまう
+    // （障害物が移動した後に空きへ戻らないのも同じ理由）。上下限を設けることで
+    // 「反対方向の観測が続けば必ず0を跨いで反転できる」ことを保証する。
+    // 対称（±10）にしているので、空き・占有どちらの極端な状態からでも、
+    // 反対方向の観測11回で必ず反転できる。値は仮値、実機での訂正速度・ちらつきを見ながら調整する。
+    static let cellScoreMax: Int = 10
+    static let cellScoreMin: Int = -10
 
     // 再計画（7章）
     static let replanAtPathFractionWalked: Float = 0.5
