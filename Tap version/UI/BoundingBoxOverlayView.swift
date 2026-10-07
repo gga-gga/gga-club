@@ -12,10 +12,11 @@ final class BoundingBoxOverlayView: UIView {
     struct Marker {
         let point: CGPoint
         let color: UIColor
+        /// 同じ位置に重なっても両方見えるよう、マーカーごとに大きさを変えられる
+        var radius: CGFloat = 5
     }
 
     private var drawnLayers: [CAShapeLayer] = []
-    private let markerRadius: CGFloat = 5
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -53,8 +54,8 @@ final class BoundingBoxOverlayView: UIView {
 
         for marker in markers {
             let markerLayer = CAShapeLayer()
-            let circle = CGRect(x: marker.point.x - markerRadius, y: marker.point.y - markerRadius,
-                                width: markerRadius * 2, height: markerRadius * 2)
+            let r = marker.radius
+            let circle = CGRect(x: marker.point.x - r, y: marker.point.y - r, width: r * 2, height: r * 2)
             markerLayer.path = UIBezierPath(ovalIn: circle).cgPath
             markerLayer.strokeColor = marker.color.cgColor
             markerLayer.fillColor = UIColor.clear.cgColor

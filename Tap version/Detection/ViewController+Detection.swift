@@ -119,10 +119,11 @@ extension ViewController {
             let distance = String(format: "%.2f", placement.horizontalDistance)
             return "\(head) | 誤差 \(error)pt | \(distance)m"
         }.joined(separator: "\n")
-        // 緑＝深度を読んだ点、赤＝求めた3D位置を投影し直した点（正しければ重なる）
+        // 緑の大きい輪＝深度を読んだ点、赤の小さい輪＝求めた3D位置を投影し直した点
+        // （正しければ赤が緑の輪の中心に入る）
         let markers = emptyChairs.compactMap { $0.placement }.flatMap { placement in
-            [BoundingBoxOverlayView.Marker(point: placement.expectedScreenPoint, color: .systemGreen),
-             BoundingBoxOverlayView.Marker(point: placement.reprojectedScreenPoint, color: .systemRed)]
+            [BoundingBoxOverlayView.Marker(point: placement.expectedScreenPoint, color: .systemGreen, radius: 10),
+             BoundingBoxOverlayView.Marker(point: placement.reprojectedScreenPoint, color: .systemRed, radius: 4)]
         }
         DispatchQueue.main.async {
             self.debugTextView.text = lines
