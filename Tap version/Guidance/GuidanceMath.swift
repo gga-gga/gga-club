@@ -9,9 +9,7 @@ import Foundation
 import simd
 
 enum GuidanceMath {
-    /// world座標Pに対する「水平（Yaw）角度」[deg]。上下は完全に無視（worldUp基準）。
-    /// ※既知の問題：rightH = cross(worldUp, fH) は実際には左向きなので、戻り値は「左が +」になっている。
-    ///   directionPhrase の -yaw がこれを打ち消しているため読み上げは正しい。段階1で両方同時に直す。
+    /// world座標Pに対する「水平（Yaw）角度」[deg]。+右 / -左。上下は完全に無視（worldUp基準）。
     static func yawAngleDeg(to P: simd_float3, cameraTransform M: simd_float4x4) -> Float {
         // カメラ位置（world）
         let C = simd_float3(M.columns.3.x, M.columns.3.y, M.columns.3.z)
@@ -30,11 +28,12 @@ enum GuidanceMath {
         // カメラ前方も水平面に投影して正規化（カメラが上下を向いていてもOK）
         let fH = simd_normalize(camForward - simd_dot(camForward, worldUp) * worldUp)
 
-        // 右方向（水平）の基底：worldUp × fH
-        let rightH = simd_normalize(simd_cross(worldUp, fH))
+        // 右方向（水平）の基底：fH × worldUp
+        // （以前は worldUp × fH で、これは左向き。directionPhrase の -yaw で打ち消していた）
+        let rightH = simd_normalize(simd_cross(fH, worldUp))
 
         // vH を (fH, rightH) 平面上で極座標化
-        let x = simd_dot(vH, rightH)
+        let x = simd_dot(vH, rightH)  // 右が +、左が -
         let z = simd_dot(vH, fH)      // 前が +
         let yaw = atan2f(x, z)        // -π..+π
 
@@ -44,7 +43,8 @@ enum GuidanceMath {
     /// 角度の方向化
     static func directionPhrase(fromYawDeg yaw: Float?) -> String? {
         guard let yaw = yaw else { return nil }
-        var clockDeg = -yaw
+        // 時計回り（右）が + の角度。yaw は右が + なのでそのまま使う
+        var clockDeg = yaw
         if clockDeg < 0 { clockDeg += 360 }
         if clockDeg >= 360 { clockDeg -= 360 }
 
@@ -70,7 +70,7 @@ enum GuidanceMath {
         guard let hour = Int(hourString) else { return nil }
 
         let targetDeg = Float(hour % 12) * 30.0
-        var clockDeg = -yaw
+        var clockDeg = yaw
         if clockDeg < 0 { clockDeg += 360 }
         if clockDeg >= 360 { clockDeg -= 360 }
 

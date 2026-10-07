@@ -3,12 +3,19 @@
 //  SUWARERU
 //
 //  検出結果のBBOXをカメラ映像の上に枠で表示する（2Dオーバーレイ）。
+//  検証用に、任意の点を小さな丸（マーカー）で重ねて表示できる。
 //
 
 import UIKit
 
 final class BoundingBoxOverlayView: UIView {
-    private var boxLayers: [CAShapeLayer] = []
+    struct Marker {
+        let point: CGPoint
+        let color: UIColor
+    }
+
+    private var drawnLayers: [CAShapeLayer] = []
+    private let markerRadius: CGFloat = 5
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -25,12 +32,12 @@ final class BoundingBoxOverlayView: UIView {
         isUserInteractionEnabled = false
     }
 
-    /// 既存の枠を全部消して、渡された矩形（UIKit座標・左上原点）の枠を描く
-    func show(_ rects: [CGRect]) {
-        for layer in boxLayers {
-            layer.removeFromSuperlayer()
+    /// 既存の表示を全部消して、渡された矩形（UIKit座標・左上原点）の枠とマーカーを描く
+    func show(_ rects: [CGRect], markers: [Marker] = []) {
+        for drawn in drawnLayers {
+            drawn.removeFromSuperlayer()
         }
-        boxLayers.removeAll()
+        drawnLayers.removeAll()
 
         for rect in rects {
             let boxLayer = CAShapeLayer()
@@ -41,7 +48,19 @@ final class BoundingBoxOverlayView: UIView {
             boxLayer.fillColor   = UIColor.clear.cgColor          // 塗りつぶし無し
             boxLayer.lineWidth   = 2.0
             layer.addSublayer(boxLayer)
-            boxLayers.append(boxLayer)
+            drawnLayers.append(boxLayer)
+        }
+
+        for marker in markers {
+            let markerLayer = CAShapeLayer()
+            let circle = CGRect(x: marker.point.x - markerRadius, y: marker.point.y - markerRadius,
+                                width: markerRadius * 2, height: markerRadius * 2)
+            markerLayer.path = UIBezierPath(ovalIn: circle).cgPath
+            markerLayer.strokeColor = marker.color.cgColor
+            markerLayer.fillColor = UIColor.clear.cgColor
+            markerLayer.lineWidth = 2.0
+            layer.addSublayer(markerLayer)
+            drawnLayers.append(markerLayer)
         }
     }
 }

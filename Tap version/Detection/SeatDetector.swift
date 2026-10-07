@@ -49,11 +49,15 @@ final class SeatDetector {
         return request.results as? [VNRecognizedObjectObservation]
     }
 
-    /// 推論結果を画面座標の Detection にし、空席の chair と person の数に分ける
+    /// 推論結果を Detection にし、空席の chair と person の数に分ける
+    /// - Parameters:
+    ///   - orientation: 推論時に Vision に渡した画像の向き
+    ///   - displayTransform: 推論に使ったフレームの frame.displayTransform(for:viewportSize:)
     func classify(_ observations: [VNRecognizedObjectObservation],
+                  orientation: CGImagePropertyOrientation,
+                  displayTransform: CGAffineTransform,
                   viewSize: CGSize,
                   timestamp: TimeInterval) -> SeatDetectionResult {
-        let W = viewSize.width, H = viewSize.height
         var detections: [Detection] = []
 
         for obs in observations {
@@ -61,21 +65,23 @@ final class SeatDetector {
                   top.confidence >= minConfidence else { continue }
             guard allowedLabels.contains(top.identifier) else { continue }
 
-            // Vision正規化BBox(左下原点) → UIKit座標(左上原点)
-            // ※既知の問題：ARSCNView の aspect-fill による左右の切り取りを考慮していない（段階1で修正予定）
+            // Vision正規化BBox → 画面座標。aspect-fill による左右の切り取りも displayTransform で反映する
             let bb = obs.boundingBox
-            let centerNorm = CGPoint(x: bb.midX, y: bb.midY)
-            let uiPoint = CGPoint(x: centerNorm.x * W,
-                                  y: (1.0 - centerNorm.y) * H)
-            let uiRect = CGRect(x: bb.minX * W,
-                                y: (1.0 - bb.maxY) * H,
-                                width: bb.width * W,
-                                height: bb.height * H)
+            let uiPoint = ImageCoordinates.screenPoint(fromVision: CGPoint(x: bb.midX, y: bb.midY),
+                                                       orientation: orientation,
+                                                       displayTransform: displayTransform,
+                                                       viewportSize: viewSize)
+            let uiRect = ImageCoordinates.screenRect(fromVision: bb,
+                                                     orientation: orientation,
+                                                     displayTransform: displayTransform,
+                                                     viewportSize: viewSize)
 
             detections.append(
                 Detection(id: UUID(),
                           label: top.identifier,
                           confidence: top.confidence,
+                          normalizedRect: bb,
+                          imageOrientation: orientation,
                           screenPoint: uiPoint,
                           screenRect: uiRect,
                           t: timestamp)

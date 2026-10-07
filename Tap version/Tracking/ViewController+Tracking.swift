@@ -67,13 +67,12 @@ extension ViewController {
             var createdCount = 0
 
             for det in sortedDet {
-                // 検出の3D位置（深度優先→Raycast）。対応付けの深さゲートと新規作成の両方で使う
-                let samplePoint = WorldPositionEstimator.preferredSamplePoint(for: det)
-                let placement = self.positionEstimator.worldTransformAndDepthFirst(at: samplePoint)
+                // 検出の3D位置（推論と同じフレームの深度から求め済み）。対応付けの深さゲートと新規作成の両方で使う
+                let placement = det.placement
 
                 // 1) 既存トラックにマッチ（同ラベル + 2D + 深さゲート）
                 if let (tid, _) = self.trackMatcher.findMatchingTrack(for: det,
-                                                                     detectionDepth: placement?.1,
+                                                                     detectionDepth: placement?.horizontalDistance,
                                                                      in: self.tracks) {
                     // ※ 位置・深さ・角度は更新しない（据え置き）
                     self.tracks[tid]?.lastScreenPoint = det.screenPoint
@@ -103,14 +102,16 @@ extension ViewController {
                     }
                     if recentSame { continue }
 
-                    // 本当に新規作成
-                    guard let (wt, depth) = placement,
-                          let frame = self.sceneView.session.currentFrame else { continue }
+                    // 本当に新規作成（3D位置が取れていない検出からは作らない）
+                    guard let placement = placement else { continue }
 
-                    let worldPos = simd_float3(wt.columns.3.x, wt.columns.3.y, wt.columns.3.z)
-                    if WorldPositionEstimator.isLikelyFloorPosition(worldPos, cameraTransform: frame.camera.transform) {
+                    let worldPos = placement.worldPosition
+                    if WorldPositionEstimator.isLikelyFloorPosition(worldPos, cameraPosition: placement.cameraPosition) {
                         continue
                     }
+                    var wt = matrix_identity_float4x4
+                    wt.columns.3 = simd_float4(worldPos.x, worldPos.y, worldPos.z, 1)
+                    let depth = placement.horizontalDistance
                     let node = LabelNodeFactory.makeBubbleNode(text: det.label)
                     node.simdTransform = wt
                     self.autoLabelsRoot.addChildNode(node)

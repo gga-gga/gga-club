@@ -29,15 +29,12 @@ extension ViewController {
         return self.yawAngleToCameraCenter(worldPos: p)
     }
 
-    /// ※既知の問題：3D距離なので、スマホと座面の高さの差だけ長く出る（段階1で水平距離に変更予定）
+    /// カメラから Track までの水平距離[m]。スマホ（胸の高さ）と座面の高さの差は含めない
     func liveDistanceMeters(for track: Track) -> Float {
         guard let frame = sceneView.session.currentFrame else { return track.depthMeters }
-        let cam = simd_float3(frame.camera.transform.columns.3.x,
-                              frame.camera.transform.columns.3.y,
-                              frame.camera.transform.columns.3.z)
-        let t = track.worldTransform
-        let p = simd_float3(t.columns.3.x, t.columns.3.y, t.columns.3.z)
-        return simd_length(p - cam)
+        let cam = frame.camera.transform.columns.3
+        let p = track.worldTransform.columns.3
+        return simd_length(simd_float2(p.x - cam.x, p.z - cam.z))
     }
 
     // MARK: - 方向振動

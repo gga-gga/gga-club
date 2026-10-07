@@ -30,7 +30,6 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
 
     // MARK: - 機能モジュール
     var seatDetector: SeatDetector!
-    var positionEstimator: WorldPositionEstimator!
     let trackMatcher = TrackMatcher()
     let directionHaptics = DirectionHapticsController()
     let speechOutput = SpeechOutput()
@@ -40,6 +39,7 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
     let autoLabelsRoot = SCNNode() // 自動ラベルの親ノード
     var bboxOverlay: BoundingBoxOverlayView!
     var viewSize: CGSize = .zero // メインでのみ更新（BGからUIViewを触らない）
+    var displayOrientation: UIInterfaceOrientation = .portrait // 同上（画面座標への変換に使う）
 
     var isGuidancePaused = true
     var shouldStartGuidanceOnAppear = false
@@ -122,7 +122,6 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
 
         // Vision / CoreML セットアップ
         seatDetector = SeatDetector()
-        positionEstimator = WorldPositionEstimator(sceneView: sceneView)
         configureAccessibility()
         directionHaptics.prepare()
         arrivalFeedback.prepare()
@@ -138,6 +137,7 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
         super.viewDidAppear(animated)
         // ここでサイズが有効
         self.viewSize = self.sceneView.bounds.size
+        self.displayOrientation = currentInterfaceOrientation()
         // 連続推論ループ開始
         self.startCoreMLLoopIfNeeded()
         startGuidanceButton.isHidden = !isGuidancePaused
@@ -204,6 +204,11 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         viewSize = sceneView.bounds.size // メインでキャッシュ
+        displayOrientation = currentInterfaceOrientation()
+    }
+
+    private func currentInterfaceOrientation() -> UIInterfaceOrientation {
+        view.window?.windowScene?.interfaceOrientation ?? .portrait
     }
 
     // MARK: - Per-frame placement & tracking

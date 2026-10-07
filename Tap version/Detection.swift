@@ -10,6 +10,7 @@
 
 import CoreGraphics
 import Foundation
+import ImageIO
 import SceneKit
 import simd
 
@@ -17,9 +18,15 @@ struct Detection {
     let id: UUID
     let label: String
     let confidence: Float
+    /// Vision の正規化BBox（推論に渡した向きの画像基準・左下原点）
+    let normalizedRect: CGRect
+    /// 推論時に Vision に渡した画像の向き
+    let imageOrientation: CGImagePropertyOrientation
     let screenPoint: CGPoint   // 画面中心（UIKit座標）
     let screenRect: CGRect     // 画面上BBox（UIKit座標）
     let t: TimeInterval
+    /// 推論に使ったのと同じフレームの深度から求めた3D位置（取れなければ nil）
+    var placement: SeatPlacement? = nil
 }
 
 struct Track {
@@ -32,6 +39,7 @@ struct Track {
     var lastSeen: TimeInterval
     var createdAt: TimeInterval
     var confidence: Float
+    /// 作成時のカメラからの水平距離[m]
     var depthMeters: Float
     var centerAngleDeg: Float?
     var arrivalAnnounced: Bool = false
