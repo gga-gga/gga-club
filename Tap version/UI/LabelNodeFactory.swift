@@ -43,6 +43,15 @@ enum LabelNodeFactory {
         parent.constraints = [billboard]
         return parent
     }
+
+    /// makeBubbleNode で作ったラベルの文字色を変える
+    static func setColor(_ color: UIColor, of node: SCNNode) {
+        for child in node.childNodes {
+            if let text = child.geometry as? SCNText {
+                text.firstMaterial?.diffuse.contents = color
+            }
+        }
+    }
 }
 
 // MARK: - UIFont helper

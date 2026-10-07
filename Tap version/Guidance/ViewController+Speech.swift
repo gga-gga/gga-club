@@ -32,7 +32,8 @@ extension ViewController {
         }
     }
 
-    func speak(track: Track, labelOverride: String? = nil) {
+    /// 案内先の方向と距離を読み上げる。前回から ttsCooldownSeconds 経っていなければ何もしない
+    func speak(track: Track) {
         // 終了処理中／到着パネル表示中はナビ音声を出さない
         if isFinishingNavigation || isAwaitingArrivalDecision || isGuidancePaused {
             return
@@ -52,15 +53,15 @@ extension ViewController {
         // すぐにこの Track を実際に読み上げてOK
         lastSpokenAt[track.id] = now
 
-        let t = track.worldTransform
-        let p = simd_float3(t.columns.3.x, t.columns.3.y, t.columns.3.z)
-        let yawDeg = self.yawAngleToCameraCenter(worldPos: p)
+        let yawDeg = self.yawAngleToCameraCenter(worldPos: track.worldPosition)
 
         var parts: [String] = ["空席"]
         if let dir = GuidanceMath.directionPhrase(fromYawDeg: yawDeg) {
             parts.append(dir)   // 例: "3時方向"
         }
-        parts.append(GuidanceMath.distancePhrase(fromMeters: liveDistanceMeters(for: track)))
+        if let distance = liveDistanceMeters(for: track) {
+            parts.append(GuidanceMath.distancePhrase(fromMeters: distance))
+        }
         let sentence = parts.joined(separator: "、")
 
         if isVoiceOverRunning() {
@@ -75,6 +76,34 @@ extension ViewController {
 
         DispatchQueue.main.async { [weak self] in
             self?.speechOutput.speak(utt)
+        }
+    }
+
+    /// 案内先を失った・切り替えたことを、理由と合わせて伝える
+    func announceTargetEvent(_ event: TargetEvent) {
+        if isFinishingNavigation || isAwaitingArrivalDecision || isGuidancePaused { return }
+
+        let text: String
+        switch event {
+        case .switched(let reason, _):
+            text = "\(targetLossPhrase(reason))別の空席を案内します。"
+        case .lost(let reason):
+            text = targetLossPhrase(reason)
+        case .selected, .unchanged:
+            return
+        }
+        interruptAndSpeak(
+            text: text,
+            rate: AVSpeechUtteranceDefaultSpeechRate * 1.1,
+            pitch: 0.9,
+            volume: 1.0
+        )
+    }
+
+    private func targetLossPhrase(_ reason: TargetLossReason) -> String {
+        switch reason {
+        case .occupied: return "案内中の空席が埋まりました。"
+        case .lostSight: return "案内中の空席を見失いました。"
         }
     }
 

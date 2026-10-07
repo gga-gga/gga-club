@@ -23,9 +23,10 @@ struct SeatDetectionResult {
 final class SeatDetector {
     // ======= 検出対象/しきい値 =======
     let allowedLabels: Set<String> = ["person", "chair"]     // ← モデルの identifier に合わせて
-    // person が chair にどのくらい重なっていたら「occupied」とみなすか
-    // ※既知の問題：IoU は座った人のBBoxが椅子より大きいと小さく出る（段階3で IoA に変更予定）
-    let personChairIoUThreshold: CGFloat = 0.15   // 好みに応じて 0.2〜0.4 あたりで調整
+    // chair の BBox の面積のうち、person の BBox に覆われている割合がこれ以上なら「occupied」とみなす（仮値・要実測）。
+    // 以前の IoU は、座った人の BBox が椅子より大きいと和集合が大きくなって値が小さく出てしまい、
+    // 人が座っていても空席と判定することがあった
+    let personChairCoverageThreshold: CGFloat = 0.3
     let minConfidence: VNConfidence = 0.80      // 信頼度しきい値
 
     private let request: VNCoreMLRequest
@@ -104,9 +105,9 @@ final class SeatDetector {
     /// chair のBBOXに person が重なっていたら「埋まっている」とみなす
     private func isChairOccupied(_ chair: Detection, persons: [Detection]) -> Bool {
         for p in persons where p.label == "person" {
-            let overlap = BoundingBoxMath.iou(chair.screenRect, p.screenRect)
-            // chair と person の BBOX の IoU がしきい値以上なら「人が座っている」と判断
-            if overlap >= personChairIoUThreshold {
+            let coverage = BoundingBoxMath.coverage(of: chair.screenRect, by: p.screenRect)
+            // chair の BBOX が person にしきい値以上覆われていたら「人が座っている」と判断
+            if coverage >= personChairCoverageThreshold {
                 return true
             }
         }
@@ -115,11 +116,11 @@ final class SeatDetector {
 }
 
 enum BoundingBoxMath {
-    static func iou(_ a: CGRect, _ b: CGRect) -> CGFloat {
+    /// a の面積のうち b に覆われている割合（0〜1）
+    static func coverage(of a: CGRect, by b: CGRect) -> CGFloat {
         let inter = a.intersection(b)
         if inter.isNull || inter.isEmpty { return 0 }
-        let interArea = inter.width * inter.height
-        let unionArea = a.width * a.height + b.width * b.height - interArea
-        return unionArea > 0 ? interArea / unionArea : 0
+        let area = a.width * a.height
+        return area > 0 ? (inter.width * inter.height) / area : 0
     }
 }

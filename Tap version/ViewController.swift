@@ -30,7 +30,7 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
 
     // MARK: - 機能モジュール
     var seatDetector: SeatDetector!
-    let trackMatcher = TrackMatcher()
+    let seatTracker = SeatTracker()   // stateQueue で保護
     let directionHaptics = DirectionHapticsController()
     let speechOutput = SpeechOutput()
     let arrivalFeedback = UINotificationFeedbackGenerator()
@@ -51,26 +51,16 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
     var lastMLTime: TimeInterval = 0
     let mlInterval: TimeInterval = 0.4
 
-    // ======= トラッキングのポリシー =======
-    let seatLabels: Set<String> = ["chair"]
-    let maxTracksPerLabel: Int = 1  // ラベルごとの同時3Dテキスト上限
-    let maxTextsPerFrame: Int = 2   // 全体の同時3Dテキスト上限
-    let trackTimeout: TimeInterval = 4.0   // 見失い判定 (秒)
-    let cooldown: TimeInterval = 0.6       // 同ラベル新規作成のクールダウン (秒)
-
-    // ======= トラッキングの状態（stateQueue で保護） =======
-    var pendingDetections: [Detection] = []
-    var tracks: [UUID: Track] = [:]
+    // ======= トラッキング =======
     var lastProcessTime: TimeInterval = 0
+    // 直近の推論での空席数・人数（stateQueue で保護）
     var lastEmptySeatCount: Int = 0
     var lastPersonCount: Int = 0
+    // 確定済みトラックの3Dラベル（描画スレッドだけで触る）
+    var trackNodes: [UUID: SCNNode] = [:]
 
     // ======= 音声案内（TTS）関連 =======
-    // 消えるまで一定間隔で発話したい → false
-    var speakOnCreateOnly = false
-    // 繰り返し発話の間隔（秒）
-    var ttsRepeatInterval: TimeInterval = 3.0
-    // クールダウン（speak(track:) で使用）
+    // 案内先の繰り返し読み上げの間隔（秒）
     var ttsCooldownSeconds: TimeInterval = 3.0
     // Trackごとの最終発話時刻
     var lastSpokenAt: [UUID: TimeInterval] = [:]
@@ -83,8 +73,7 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
     // 終了処理中（「お疲れ様でした」再生〜画面を閉じるまで）は true
     var isFinishingNavigation = false
 
-    // [ARRIVAL] 到着アナウンスの有効/無効 と 距離しきい値（m）
-    var arrivalAnnounceEnabled: Bool = true
+    // [ARRIVAL] 到着とみなす案内先までの水平距離（m）
     let arrivalThresholdMeters: Float = 1.3
     var askExitOnArrivalEnabled: Bool = true
 
@@ -222,20 +211,26 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
         if time - self.lastProcessTime < 0.4 { return }
         self.lastProcessTime = time
 
-        let step = runTrackingStep(time: time)
+        guard let frame = sceneView.session.currentFrame else { return }
+        let m = frame.camera.transform
+        let cameraPosition = simd_float3(m.columns.3.x, m.columns.3.y, m.columns.3.z)
 
-        let targetTrack = selectTargetTrack(time: time)
-        self.updateDirectionHaptics(for: targetTrack)
+        // トラックの時刻は推論側と同じ時計（CACurrentMediaTime）で扱う
+        let step = runTrackingStep(now: CACurrentMediaTime(), cameraPosition: cameraPosition)
+        updateTrackNodes(confirmedTracks: step.confirmedTracks, targetID: step.target?.id)
+        updateDirectionHaptics(for: step.target)
+
         let statusSummary = "状況確認中\n空席: \(step.currentEmptySeatCount)  人: \(step.currentPersonCount)"
-        guard step.didProcessDetections || isGuidancePaused else { return }
-
+        let trackList = trackListText(confirmedTracks: step.confirmedTracks,
+                                      targetID: step.target?.id,
+                                      cameraPosition: cameraPosition)
         DispatchQueue.main.async {
             if self.isGuidancePaused {
                 self.TextView.text = statusSummary
                 self.TextView.accessibilityValue = statusSummary
             } else {
-                self.TextView.text = step.angleLines   // 空でも毎回更新してOK（好み）
-                self.TextView.accessibilityValue = step.angleLines.isEmpty ? "検出なし" : step.angleLines
+                self.TextView.text = trackList
+                self.TextView.accessibilityValue = trackList.isEmpty ? "検出なし" : trackList
             }
             if step.shouldShowArrivalPanel {
                 self.showArrivalPanel()
@@ -243,8 +238,12 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
         }
 
         if !isGuidancePaused {
-            for track in step.tracksToSpeak {
-                self.speak(track: track)
+            announceTargetEvent(step.targetEvent)
+            // 案内先が変わったことを伝えた直後は、その発話を優先する（次の周期から案内先を読み上げる）
+            if case .unchanged = step.targetEvent, let target = step.target {
+                speak(track: target)
+            } else if case .selected(let target) = step.targetEvent {
+                speak(track: target)
             }
         }
     }

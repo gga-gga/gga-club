@@ -51,7 +51,6 @@ extension ViewController {
                 if self.isSituationCheckInProgress {
                     self.situationTally.record(emptySeatCount: 0, personCount: 0)
                 }
-                self.pendingDetections.removeAll()
             }
             DispatchQueue.main.async { [weak self] in
                 self?.debugTextView.text = ""
@@ -89,6 +88,10 @@ extension ViewController {
             return chair
         }
 
+        // 座席トラックへの取り込みも同じフレームで行う（座面に人が重なったかの判定に、
+        // このフレームの person の BBox が必要なため）。空席が無くても person の観測は取り込む
+        let seatPositions = emptyChairs.compactMap { $0.placement?.worldPosition }
+        let personRects = result.persons.map { $0.screenRect }
         stateQueue.sync {
             self.lastEmptySeatCount = emptyChairs.count
             self.lastPersonCount = result.personCount
@@ -96,22 +99,22 @@ extension ViewController {
                 self.situationTally.record(emptySeatCount: emptyChairs.count,
                                            personCount: result.personCount)
             }
+            self.seatTracker.integrate(seatPositions: seatPositions,
+                                       personRects: personRects,
+                                       label: "chair",
+                                       frame: frame,
+                                       interfaceOrientation: orientationForDisplay,
+                                       viewportSize: viewportSize,
+                                       now: now)
         }
 
-        // person は今回はトラッキングに使わないので pendingDetections には積まない
         guard !emptyChairs.isEmpty else {
             // 検出が無いときはBBOXを全部消す
             DispatchQueue.main.async { [weak self] in
+                self?.debugTextView.text = ""
                 self?.bboxOverlay.show([])
             }
             return
-        }
-
-        // 古い検出を掃除し、高信頼順で積む（emptyChairs は高信頼順に並んでいる）
-        let cutoff = now - 0.5
-        stateQueue.sync {
-            self.pendingDetections.removeAll(where: { $0.t < cutoff })
-            self.pendingDetections.append(contentsOf: emptyChairs)
         }
 
         // デバッグ表示：信頼度、座面の点の数・広がり・水平距離、または推定できなかった理由
