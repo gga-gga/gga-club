@@ -10,6 +10,25 @@ import AVFoundation
 import UIKit
 import simd
 
+/// 案内先の方向と距離（描画スレッドで計算し、メインスレッドの読み上げ・振動に渡す）
+struct TargetGuidance {
+    let trackID: UUID
+    /// 水平角度[deg]（右が +）
+    let yawDeg: Float
+    /// 水平距離[m]
+    let distance: Float
+
+    var isBehind: Bool { abs(yawDeg) >= 90 }
+
+    init(target: Track, cameraTransform: simd_float4x4) {
+        trackID = target.id
+        yawDeg = GuidanceMath.yawAngleDeg(to: target.worldPosition, cameraTransform: cameraTransform)
+        let camera = cameraTransform.columns.3
+        distance = simd_length(simd_float2(target.worldPosition.x - camera.x,
+                                           target.worldPosition.z - camera.z))
+    }
+}
+
 extension ViewController {
     // MARK: - 角度・距離（現在のカメラ姿勢基準）
 
@@ -19,35 +38,18 @@ extension ViewController {
         return GuidanceMath.yawAngleDeg(to: P, cameraTransform: frame.camera.transform)
     }
 
-    /// Trackの現在位置から、発話直前に「水平Yaw角[deg]」を再計算
-    func liveYawDeg(for track: Track) -> Float? {
-        guard let frame = sceneView.session.currentFrame else { return nil }
-        // 垂直方向は無視して水平面だけで角度を計算する
-        let cameraY = frame.camera.transform.columns.3.y
-        let p = simd_float3(track.worldPosition.x, cameraY, track.worldPosition.z)
-        return self.yawAngleToCameraCenter(worldPos: p)
-    }
-
-    /// カメラから Track までの水平距離[m]。スマホ（胸の高さ）と座面の高さの差は含めない
-    func liveDistanceMeters(for track: Track) -> Float? {
-        guard let frame = sceneView.session.currentFrame else { return nil }
-        let cam = frame.camera.transform.columns.3
-        let p = track.worldPosition
-        return simd_length(simd_float2(p.x - cam.x, p.z - cam.z))
-    }
-
     // MARK: - 方向振動
 
-    func updateDirectionHaptics(for track: Track?) {
+    /// メインスレッドから呼ぶ。案内中で、到着パネル・終了処理中でないときだけ振動させる
+    func updateDirectionHaptics(for guidance: TargetGuidance?) {
         guard !isGuidancePaused,
               !isFinishingNavigation,
-              let track = track,
-              let yaw = liveYawDeg(for: track),
-              let angleDiff = GuidanceMath.directionDifferenceAngleDeg(fromYawDeg: yaw) else {
+              !isAwaitingArrivalDecision,
+              let guidance else {
             directionHaptics.stop()
             return
         }
-        directionHaptics.update(angleDiff: angleDiff)
+        directionHaptics.update(yawDeg: guidance.yawDeg)
     }
 
     // MARK: - 空席なし監視

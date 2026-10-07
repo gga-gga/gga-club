@@ -32,8 +32,9 @@ extension ViewController {
         }
     }
 
-    /// 案内先の方向と距離を読み上げる。前回から ttsCooldownSeconds 経っていなければ何もしない
-    func speak(track: Track) {
+    /// 案内先の方向と距離を読み上げる（メインスレッドから呼ぶ）。
+    /// 前回から ttsCooldownSeconds 経っていなければ何もしない
+    func speak(guidance: TargetGuidance) {
         // 終了処理中／到着パネル表示中はナビ音声を出さない
         if isFinishingNavigation || isAwaitingArrivalDecision || isGuidancePaused {
             return
@@ -41,7 +42,7 @@ extension ViewController {
 
         let now = CACurrentMediaTime()
         // クールダウン（あまり頻度が高すぎないように）
-        if let last = lastSpokenAt[track.id],
+        if let last = lastSpokenAt[guidance.trackID],
            now - last < ttsCooldownSeconds {
             return
         }
@@ -49,19 +50,14 @@ extension ViewController {
         // ★ すでに何かしゃべっている最中ならスキップする
         if speechOutput.isSpeaking { return }
 
-        // ここまで来たら「いまは無音 or しゃべり終わり直後」なので
-        // すぐにこの Track を実際に読み上げてOK
-        lastSpokenAt[track.id] = now
+        lastSpokenAt[guidance.trackID] = now
 
-        let yawDeg = self.yawAngleToCameraCenter(worldPos: track.worldPosition)
-
-        var parts: [String] = ["空席"]
-        if let dir = GuidanceMath.directionPhrase(fromYawDeg: yawDeg) {
+        // 後ろ（90°以上）のときは振動を止めているので、言葉で後ろだと伝える
+        var parts: [String] = [guidance.isBehind ? "空席は後ろです" : "空席"]
+        if let dir = GuidanceMath.directionPhrase(fromYawDeg: guidance.yawDeg) {
             parts.append(dir)   // 例: "3時方向"
         }
-        if let distance = liveDistanceMeters(for: track) {
-            parts.append(GuidanceMath.distancePhrase(fromMeters: distance))
-        }
+        parts.append(GuidanceMath.distancePhrase(fromMeters: guidance.distance))
         let sentence = parts.joined(separator: "、")
 
         if isVoiceOverRunning() {
@@ -73,10 +69,7 @@ extension ViewController {
                                              rate: AVSpeechUtteranceDefaultSpeechRate * 1.1,
                                              pitch: 0.9,
                                              volume: 1.0)
-
-        DispatchQueue.main.async { [weak self] in
-            self?.speechOutput.speak(utt)
-        }
+        speechOutput.speak(utt)
     }
 
     /// 案内先を失った・切り替えたことを、理由と合わせて伝える

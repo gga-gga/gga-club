@@ -215,11 +215,12 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
         let m = frame.camera.transform
         let cameraPosition = simd_float3(m.columns.3.x, m.columns.3.y, m.columns.3.z)
 
+        // ここ（描画スレッド）では計算だけを行い、読み上げ・振動・画面表示はメインスレッドで行う
         // トラックの時刻は推論側と同じ時計（CACurrentMediaTime）で扱う
         let step = runTrackingStep(now: CACurrentMediaTime(), cameraPosition: cameraPosition)
         updateTrackNodes(confirmedTracks: step.confirmedTracks, targetID: step.target?.id)
-        updateDirectionHaptics(for: step.target)
 
+        let guidance = step.target.map { TargetGuidance(target: $0, cameraTransform: m) }
         let statusSummary = "状況確認中\n空席: \(step.currentEmptySeatCount)  人: \(step.currentPersonCount)"
         let trackList = trackListText(confirmedTracks: step.confirmedTracks,
                                       targetID: step.target?.id,
@@ -235,15 +236,16 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
             if step.shouldShowArrivalPanel {
                 self.showArrivalPanel()
             }
-        }
+            self.updateDirectionHaptics(for: guidance)
 
-        if !isGuidancePaused {
-            announceTargetEvent(step.targetEvent)
+            guard !self.isGuidancePaused else { return }
+            self.announceTargetEvent(step.targetEvent)
             // 案内先が変わったことを伝えた直後は、その発話を優先する（次の周期から案内先を読み上げる）
-            if case .unchanged = step.targetEvent, let target = step.target {
-                speak(track: target)
-            } else if case .selected(let target) = step.targetEvent {
-                speak(track: target)
+            switch step.targetEvent {
+            case .unchanged, .selected:
+                if let guidance { self.speak(guidance: guidance) }
+            case .switched, .lost:
+                break
             }
         }
     }

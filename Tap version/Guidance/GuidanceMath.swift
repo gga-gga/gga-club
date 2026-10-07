@@ -61,20 +61,4 @@ enum GuidanceMath {
         if m < 3.0 { return String(format: "残り%.1fメートル", m) }      // 2.3m → 2.3メートル
         return String(format: "残り%.0fメートル", round(m))               // 5.2m → 5メートル
     }
-
-    /// 方向フレーズを基準にした角度差（0〜180）を算出
-    /// ※既知の問題：正面(0°)からではなく「最寄りの時刻」からのズレなので常に 0〜15° になる（段階4で修正予定）
-    static func directionDifferenceAngleDeg(fromYawDeg yaw: Float?) -> Float? {
-        guard let yaw = yaw, let phrase = directionPhrase(fromYawDeg: yaw) else { return nil }
-        let hourString = phrase.replacingOccurrences(of: "時方向", with: "")
-        guard let hour = Int(hourString) else { return nil }
-
-        let targetDeg = Float(hour % 12) * 30.0
-        var clockDeg = yaw
-        if clockDeg < 0 { clockDeg += 360 }
-        if clockDeg >= 360 { clockDeg -= 360 }
-
-        let diff = abs(clockDeg - targetDeg)
-        return min(diff, 360 - diff)
-    }
 }
