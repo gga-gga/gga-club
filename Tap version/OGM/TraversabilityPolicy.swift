@@ -22,13 +22,24 @@ struct TraversabilityPolicy {
     /// 判定内に留めておけば、実際の観測が入った時点で自動的にそちらへ置き換わる。
     var assumedTraversable: Set<GridCoordinate> = []
 
+    /// 「未観測のときだけ」通行可能とみなすセル（Tap version で追加）。
+    /// スマホを胸の高さで前に向けると、足元から約1.5〜2m先までの床はカメラに映らず、
+    /// 現在地から一歩も広がれずに経路が出ない。その死角と、実際に歩いてきた場所を入れる。
+    /// assumedTraversable と違い、観測済みならその観測（占有なら通行不可）に従い、
+    /// 障害物の膨張で通行不可にされたセルも通さない。
+    var assumedFreeIfUnobserved: Set<GridCoordinate> = []
+
     /// 未観測セルは通行不可として扱う（保守的方式）。
     ///  ・未観測の壁を突き抜ける経路を提示しない（安全）
     ///  ・探索範囲が観測済みセル（有限集合）に限定され、到達不能な目的地を指定されたときに
     ///    未観測空間へ無限展開してハングするのが構造的に消える
     func isTraversable(_ coord: GridCoordinate) -> Bool {
         if assumedTraversable.contains(coord) { return true }
-        guard let state = grid.state(at: coord), !state.isOccupied else { return false }
+        if let state = grid.state(at: coord) {
+            guard !state.isOccupied else { return false }
+        } else {
+            guard assumedFreeIfUnobserved.contains(coord) else { return false }
+        }
         return costMap[coord]?.isBlocked != true
     }
 }

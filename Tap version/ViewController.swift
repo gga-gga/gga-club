@@ -93,6 +93,8 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
     var lastOGMUpdateTime: TimeInterval = 0
     /// OGM が推定した床の高さ。座面の推定（推論スレッド）から読むので stateQueue で保護する
     var latestFloorY: Float?
+    /// 歩いてきた場所のセル（経路計画で、未観測でも通れるとみなす。描画スレッドだけで触る）
+    var walkedCells: Set<GridCoordinate> = []
 
     deinit {
         NotificationCenter.default.removeObserver(self)
@@ -223,7 +225,7 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
         updateTrackNodes(confirmedTracks: step.confirmedTracks, targetID: step.target?.id)
 
         // 案内先までの経路（OGM と同じ描画スレッドで計画する）。読み上げ・振動は経路の「次に向かう点」の方向
-        let plan = planPath(toward: step.target, from: cameraPosition)
+        let plan = planPath(toward: step.target, cameraTransform: m)
         pathVisualizer.update(path: plan.path, steeringPoint: plan.steeringPoint)
         let guidance = step.target.map {
             TargetGuidance(target: $0, cameraTransform: m, steeringPoint: plan.steeringPoint)

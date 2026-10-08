@@ -67,8 +67,11 @@ final class OGMNavigationEngine {
     /// [7]〜[8]：目標（座席など）へ向かう経路を計画する。
     /// 目標がまだ観測範囲外でも、到達可能な観測済みセルのうち目標に最も近いもの
     /// （フロンティア）を目的地にするため、経路は出る。
+    /// - Parameter assumedFreeIfUnobserved: 未観測のときだけ通行可能とみなすセル
+    ///   （足元の死角・歩いてきた場所。TraversabilityPolicy 参照。Tap version で追加）
     @discardableResult
-    func planPath(from currentPosition: simd_float3, toward target: simd_float3) -> PlanningResult {
+    func planPath(from currentPosition: simd_float3, toward target: simd_float3,
+                  assumedFreeIfUnobserved: Set<GridCoordinate> = []) -> PlanningResult {
         guard let floorY else { return .noFloorEstimate }
 
         let costMap = CostMapGenerator(grid: grid).generateCostMap(occupiedCoordinates: grid.cells)
@@ -77,7 +80,8 @@ final class OGMNavigationEngine {
         // 足元は未観測になりやすいので、現在地だけは通行可能とみなす。
         let traversability = TraversabilityPolicy(grid: grid,
                                                    costMap: costMap,
-                                                   assumedTraversable: [startCoord])
+                                                   assumedTraversable: [startCoord],
+                                                   assumedFreeIfUnobserved: assumedFreeIfUnobserved)
 
         let selector = FrontierGoalSelector(grid: grid, traversability: traversability)
         guard let goal = selector.selectGoal(from: startCoord, towards: target) else {
