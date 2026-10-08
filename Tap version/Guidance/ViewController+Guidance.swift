@@ -13,16 +13,27 @@ import simd
 /// 案内先の方向と距離（描画スレッドで計算し、メインスレッドの読み上げ・振動に渡す）
 struct TargetGuidance {
     let trackID: UUID
-    /// 水平角度[deg]（右が +）
+    /// 案内する方向の水平角度[deg]（右が +）。経路があれば次に向かう点、無ければ空席そのもの
     let yawDeg: Float
-    /// 水平距離[m]
+    /// 空席そのものの水平角度[deg]（デバッグ表示用）
+    let seatYawDeg: Float
+    /// 経路に沿って案内しているか（false＝経路が無く空席の方向を直接案内している）
+    let followsPath: Bool
+    /// 空席までの水平距離[m]
     let distance: Float
 
     var isBehind: Bool { abs(yawDeg) >= 90 }
 
-    init(target: Track, cameraTransform: simd_float4x4) {
+    init(target: Track, cameraTransform: simd_float4x4, steeringPoint: simd_float3?) {
         trackID = target.id
-        yawDeg = GuidanceMath.yawAngleDeg(to: target.worldPosition, cameraTransform: cameraTransform)
+        seatYawDeg = GuidanceMath.yawAngleDeg(to: target.worldPosition, cameraTransform: cameraTransform)
+        if let steeringPoint {
+            yawDeg = GuidanceMath.yawAngleDeg(to: steeringPoint, cameraTransform: cameraTransform)
+            followsPath = true
+        } else {
+            yawDeg = seatYawDeg
+            followsPath = false
+        }
         let camera = cameraTransform.columns.3
         distance = simd_length(simd_float2(target.worldPosition.x - camera.x,
                                            target.worldPosition.z - camera.z))

@@ -52,13 +52,7 @@ extension ViewController {
 
         lastSpokenAt[guidance.trackID] = now
 
-        // 後ろ（90°以上）のときは振動を止めているので、言葉で後ろだと伝える
-        var parts: [String] = [guidance.isBehind ? "空席は後ろです" : "空席"]
-        if let dir = GuidanceMath.directionPhrase(fromYawDeg: guidance.yawDeg) {
-            parts.append(dir)   // 例: "3時方向"
-        }
-        parts.append(GuidanceMath.distancePhrase(fromMeters: guidance.distance))
-        let sentence = parts.joined(separator: "、")
+        let sentence = guidanceSentence(for: guidance)
 
         if isVoiceOverRunning() {
             announceForAccessibility(sentence)
@@ -70,6 +64,21 @@ extension ViewController {
                                              pitch: 0.9,
                                              volume: 1.0)
         speechOutput.speak(utt)
+    }
+
+    /// 案内の読み上げ文。後ろ（90°以上）のときは振動を止めているので、言葉で後ろだと伝える
+    ///  - 経路あり：「11時方向へ進んでください、空席まで残り2.3メートル」（振動と同じ、進む方向）
+    ///  - 経路なし：「空席、1時方向、残り2.3メートル」（空席そのものの方向）
+    private func guidanceSentence(for guidance: TargetGuidance) -> String {
+        let direction = GuidanceMath.directionPhrase(fromYawDeg: guidance.yawDeg) ?? ""
+        let distance = GuidanceMath.distancePhrase(fromMeters: guidance.distance)
+
+        if guidance.followsPath {
+            let behind = guidance.isBehind ? "後ろです、" : ""
+            return "\(behind)\(direction)へ進んでください、空席まで\(distance)"
+        }
+        let head = guidance.isBehind ? "空席は後ろです" : "空席"
+        return "\(head)、\(direction)、\(distance)"
     }
 
     /// 案内先を失った・切り替えたことを、理由と合わせて伝える

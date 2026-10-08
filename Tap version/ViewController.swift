@@ -38,6 +38,7 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
     // MARK: - Scene / Display
     let autoLabelsRoot = SCNNode() // 自動ラベルの親ノード
     var bboxOverlay: BoundingBoxOverlayView!
+    var pathVisualizer: PathVisualizer!   // デバッグ用：経路を床の上に表示（描画スレッドだけで触る）
     var viewSize: CGSize = .zero // メインでのみ更新（BGからUIViewを触らない）
     var displayOrientation: UIInterfaceOrientation = .portrait // 同上（画面座標への変換に使う）
 
@@ -106,6 +107,7 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
         sceneView.autoenablesDefaultLighting = true
         sceneView.scene = SCNScene()
         sceneView.scene.rootNode.addChildNode(autoLabelsRoot)
+        pathVisualizer = PathVisualizer(parent: sceneView.scene.rootNode)
 
         bboxOverlay = BoundingBoxOverlayView(frame: sceneView.bounds)
         bboxOverlay.autoresizingMask = [.flexibleWidth, .flexibleHeight]
@@ -220,18 +222,25 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
         let step = runTrackingStep(now: CACurrentMediaTime(), cameraPosition: cameraPosition)
         updateTrackNodes(confirmedTracks: step.confirmedTracks, targetID: step.target?.id)
 
-        let guidance = step.target.map { TargetGuidance(target: $0, cameraTransform: m) }
-        let statusSummary = "状況確認中\n空席: \(step.currentEmptySeatCount)  人: \(step.currentPersonCount)"
+        // 案内先までの経路（OGM と同じ描画スレッドで計画する）。読み上げ・振動は経路の「次に向かう点」の方向
+        let plan = planPath(toward: step.target, from: cameraPosition)
+        pathVisualizer.update(path: plan.path, steeringPoint: plan.steeringPoint)
+        let guidance = step.target.map {
+            TargetGuidance(target: $0, cameraTransform: m, steeringPoint: plan.steeringPoint)
+        }
+
+        let planLine = Self.planDebugLine(plan: plan, guidance: guidance)
+        let statusSummary = "状況確認中\n空席: \(step.currentEmptySeatCount)  人: \(step.currentPersonCount)\n\(planLine)"
         let trackList = trackListText(confirmedTracks: step.confirmedTracks,
                                       targetID: step.target?.id,
-                                      cameraPosition: cameraPosition)
+                                      cameraPosition: cameraPosition) + "\n" + planLine
         DispatchQueue.main.async {
             if self.isGuidancePaused {
                 self.TextView.text = statusSummary
                 self.TextView.accessibilityValue = statusSummary
             } else {
                 self.TextView.text = trackList
-                self.TextView.accessibilityValue = trackList.isEmpty ? "検出なし" : trackList
+                self.TextView.accessibilityValue = trackList
             }
             if step.shouldShowArrivalPanel {
                 self.showArrivalPanel()
@@ -248,6 +257,17 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
                 break
             }
         }
+    }
+
+    /// デバッグ表示：経路計画の状態と、案内している方向（進む方向）と空席そのものの方向
+    private static func planDebugLine(plan: PathPlan, guidance: TargetGuidance?) -> String {
+        guard let guidance else { return plan.statusText }
+        let seat = String(format: "空席%+.0f°", guidance.seatYawDeg)
+        if guidance.followsPath {
+            return "\(plan.statusText) | 進む\(String(format: "%+.0f°", guidance.yawDeg)) \(seat)"
+        }
+        // 経路が無い（失敗・短すぎる）ときは空席の方向を直接案内している
+        return "\(plan.statusText)（空席の方向で案内）| \(seat)"
     }
 
     // MARK: - 案内開始・中断・終了
