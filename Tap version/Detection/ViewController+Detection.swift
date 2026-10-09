@@ -88,15 +88,19 @@ extension ViewController {
             return chair
         }
 
+        // 空席候補は「座面を確認できた椅子」だけ。人と重なっていなくても、座面が見えない
+        // （荷物が置かれている・遠すぎる・床が未推定など）椅子は空席として数えない
+        let seatCandidates = emptyChairs.filter { $0.placement != nil }
+
         // 座席トラックへの取り込みも同じフレームで行う（座面に人が重なったかの判定に、
         // このフレームの person の BBox が必要なため）。空席が無くても person の観測は取り込む
-        let seatPositions = emptyChairs.compactMap { $0.placement?.worldPosition }
+        let seatPositions = seatCandidates.compactMap { $0.placement?.worldPosition }
         let personRects = result.persons.map { $0.screenRect }
         stateQueue.sync {
-            self.lastEmptySeatCount = emptyChairs.count
+            self.lastEmptySeatCount = seatCandidates.count
             self.lastPersonCount = result.personCount
             if self.isSituationCheckInProgress {
-                self.situationTally.record(emptySeatCount: emptyChairs.count,
+                self.situationTally.record(emptySeatCount: seatCandidates.count,
                                            personCount: result.personCount)
             }
             self.seatTracker.integrate(seatPositions: seatPositions,
@@ -138,10 +142,13 @@ extension ViewController {
                 BoundingBoxOverlayView.Marker(point: $0, color: .systemGreen, radius: 2)
             } + [BoundingBoxOverlayView.Marker(point: placement.centerScreenPoint, color: .systemRed, radius: 8)]
         }
+        // 黄色の枠＝空席候補（座面を確認できた）、灰色の枠＝人とは重なっていないが座面を確認できない
+        let candidateRects = seatCandidates.map { $0.screenRect }
+        let unconfirmedRects = emptyChairs.filter { $0.placement == nil }.map { $0.screenRect }
         DispatchQueue.main.async {
             self.debugTextView.text = lines
             // このフレームで検出した BBOX を画面に反映
-            self.bboxOverlay.show(emptyChairs.map { $0.screenRect }, markers: markers)
+            self.bboxOverlay.show(candidateRects, dimmedRects: unconfirmedRects, markers: markers)
         }
     }
 

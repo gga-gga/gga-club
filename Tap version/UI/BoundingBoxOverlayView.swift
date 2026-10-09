@@ -33,23 +33,32 @@ final class BoundingBoxOverlayView: UIView {
         isUserInteractionEnabled = false
     }
 
+    private func addBox(_ rect: CGRect, color: UIColor) {
+        let boxLayer = CAShapeLayer()
+        boxLayer.frame = rect
+        boxLayer.path = UIBezierPath(rect: CGRect(origin: .zero, size: rect.size)).cgPath
+        boxLayer.strokeColor = color.cgColor          // 枠線の色
+        boxLayer.fillColor   = UIColor.clear.cgColor  // 塗りつぶし無し
+        boxLayer.lineWidth   = 2.0
+        layer.addSublayer(boxLayer)
+        drawnLayers.append(boxLayer)
+    }
+
     /// 既存の表示を全部消して、渡された矩形（UIKit座標・左上原点）の枠とマーカーを描く
-    func show(_ rects: [CGRect], markers: [Marker] = []) {
+    /// - Parameters:
+    ///   - rects: 黄色の枠で描く矩形
+    ///   - dimmedRects: 灰色の枠で描く矩形（検出はしたが対象外のもの）
+    func show(_ rects: [CGRect], dimmedRects: [CGRect] = [], markers: [Marker] = []) {
         for drawn in drawnLayers {
             drawn.removeFromSuperlayer()
         }
         drawnLayers.removeAll()
 
+        for rect in dimmedRects {
+            addBox(rect, color: .systemGray)
+        }
         for rect in rects {
-            let boxLayer = CAShapeLayer()
-            boxLayer.frame = rect
-            boxLayer.path = UIBezierPath(rect: CGRect(origin: .zero, size: rect.size)).cgPath
-
-            boxLayer.strokeColor = UIColor.systemYellow.cgColor   // 枠線の色
-            boxLayer.fillColor   = UIColor.clear.cgColor          // 塗りつぶし無し
-            boxLayer.lineWidth   = 2.0
-            layer.addSublayer(boxLayer)
-            drawnLayers.append(boxLayer)
+            addBox(rect, color: .systemYellow)
         }
 
         // 色と大きさが同じマーカーは1枚のレイヤーにまとめて描く（座面の点は数十個あるため）
