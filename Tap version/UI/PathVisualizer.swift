@@ -2,10 +2,16 @@
 //  PathVisualizer.swift
 //  SUWARERU
 //
-//  デバッグ用：A* の経路をカメラ映像の床の上に表示する（描画スレッドから呼ぶ）。
+//  デバッグ用：A* の経路をカメラ映像に重ねて表示する（描画スレッドから呼ぶ）。
 //   - 赤い線と矢印：経路（矢印は 0.5m ごとに進む向きを指す）
 //   - 水色の大きい点：次に向かう点（読み上げ・振動の方向の元）
 //   - 緑の点：経路の終点（A* の目的地＝座席の手前）
+//   - 細い縦線：上の印から床まで下ろした線（どの床の上を通るかを示す）
+//
+//  経路は床から 0.9m（腰の高さ）に浮かせて描く。胸の高さのカメラからは足元〜約1.5m先の床が
+//  映らないため、床の上に描くと自分の近くの経路（曲がり始めなど）が画面の外になってしまう。
+//  浮かせると約0.4m先から見える。縦線の下端で、床の高さの推定がずれていないかも確認できる。
+//
 //  読み上げが「1時方向」と言ったとき、水色の点が実際に右前にあれば左右の符号は正しい。
 //
 
@@ -17,11 +23,14 @@ final class PathVisualizer {
     /// false にすると何も表示しない（本番で隠したいとき用）
     static var isEnabled = true
 
+    /// 経路を描く高さ（床からの高さ[m]）
+    private static let heightAboveFloor: Float = 0.9
+    private static let arrowSpacing: Float = 0.5
+
     private static let pathColor = UIColor(red: 1.0, green: 0.0, blue: 0.1, alpha: 1.0)
     private static let lineRadius: CGFloat = 0.012
-    private static let arrowSpacing: Float = 0.5
-    /// 床に埋もれて見えなくならないよう、少しだけ浮かせる
-    private static let heightOffset: Float = 0.03
+    private static let dropLineRadius: CGFloat = 0.004
+    private static let dropLineColor = UIColor(red: 1.0, green: 0.0, blue: 0.1, alpha: 0.5)
 
     /// 矢印の頭（円すい。頂点が +Y を向いているので、進む向きへ回して使う）
     private static let arrowHead: SCNCone = {
@@ -38,28 +47,36 @@ final class PathVisualizer {
         parent.addChildNode(root)
     }
 
+    /// - Parameter path: A* の経路（各点の y は床の高さ）
     func update(path: [simd_float3], steeringPoint: simd_float3?) {
         clear()
         guard Self.isEnabled, let goal = path.last else { return }
-        let lifted = path.map { simd_float3($0.x, $0.y + Self.heightOffset, $0.z) }
+        let lifted = path.map(Self.lift)
 
         // 経路の線
         for index in 1..<max(1, lifted.count) {
-            if let segment = Self.segmentNode(from: lifted[index - 1], to: lifted[index]) {
+            if let segment = Self.segmentNode(from: lifted[index - 1], to: lifted[index],
+                                              radius: Self.lineRadius, color: Self.pathColor) {
                 root.addChildNode(segment)
             }
         }
-        // 進む向きの矢印
+        // 進む向きの矢印と、その位置から床への縦線
         for (position, direction) in Self.arrowPlacements(along: lifted) {
             let node = SCNNode(geometry: Self.arrowHead)
             node.simdPosition = position
             node.simdOrientation = simd_quatf(from: simd_float3(0, 1, 0), to: direction)
             root.addChildNode(node)
+            addDropLine(from: position)
         }
 
-        addDot(Self.goalDot, at: simd_float3(goal.x, goal.y + Self.heightOffset, goal.z))
+        let liftedGoal = Self.lift(goal)
+        addDot(Self.goalDot, at: liftedGoal)
+        addDropLine(from: liftedGoal)
         if let steeringPoint {
-            addDot(Self.steeringDot, at: simd_float3(steeringPoint.x, steeringPoint.y + Self.heightOffset, steeringPoint.z))
+            // 操舵点は経路上の点なので、y は床の高さ
+            let liftedSteering = Self.lift(steeringPoint)
+            addDot(Self.steeringDot, at: liftedSteering)
+            addDropLine(from: liftedSteering)
         }
     }
 
@@ -75,14 +92,29 @@ final class PathVisualizer {
         root.addChildNode(node)
     }
 
+    /// 浮かせた点から床までの細い縦線
+    private func addDropLine(from liftedPoint: simd_float3) {
+        let floorPoint = simd_float3(liftedPoint.x, liftedPoint.y - Self.heightAboveFloor, liftedPoint.z)
+        if let line = Self.segmentNode(from: floorPoint, to: liftedPoint,
+                                       radius: Self.dropLineRadius, color: Self.dropLineColor) {
+            root.addChildNode(line)
+        }
+    }
+
+    /// 床の高さの点を、表示する高さへ持ち上げる
+    private static func lift(_ point: simd_float3) -> simd_float3 {
+        simd_float3(point.x, point.y + heightAboveFloor, point.z)
+    }
+
     /// 2点を結ぶ細い円柱（SCNCylinder の軸は +Y なので、2点を結ぶ向きへ回す）
-    private static func segmentNode(from start: simd_float3, to end: simd_float3) -> SCNNode? {
+    private static func segmentNode(from start: simd_float3, to end: simd_float3,
+                                    radius: CGFloat, color: UIColor) -> SCNNode? {
         let vector = end - start
         let length = simd_length(vector)
         guard length > 1e-4 else { return nil }
 
-        let cylinder = SCNCylinder(radius: lineRadius, height: CGFloat(length))
-        applyMaterial(to: cylinder, color: pathColor)
+        let cylinder = SCNCylinder(radius: radius, height: CGFloat(length))
+        applyMaterial(to: cylinder, color: color)
         let node = SCNNode(geometry: cylinder)
         node.simdPosition = (start + end) / 2
         node.simdOrientation = simd_quatf(from: simd_float3(0, 1, 0), to: vector / length)
