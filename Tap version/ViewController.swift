@@ -148,14 +148,13 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
         let config = ARWorldTrackingConfiguration()
         config.planeDetection = [.horizontal, .vertical]
 
-        // LiDAR 深度（平滑化優先）とメッシュを有効化（対応端末のみ）
+        // LiDAR 深度（平滑化優先）を有効化（対応端末のみ）。
+        // シーン再構築（3Dメッシュ生成）は使っていない（OGM・座面の推定は深度を直接使う）ので有効にしない。
+        // 有効にしていた頃は、CPU・GPU・電池を無駄に使っていた
         if ARWorldTrackingConfiguration.supportsFrameSemantics(.smoothedSceneDepth) {
             config.frameSemantics.insert(.smoothedSceneDepth)
         } else if ARWorldTrackingConfiguration.supportsFrameSemantics(.sceneDepth) {
             config.frameSemantics.insert(.sceneDepth)
-        }
-        if ARWorldTrackingConfiguration.supportsSceneReconstruction(.meshWithClassification) {
-            config.sceneReconstruction = .meshWithClassification
         }
 
         sceneView.session.run(config)
