@@ -188,7 +188,6 @@ extension ViewController {
     /// 誘導を止めて、状況確認からやり直す（誘導中に空席が見つからない状態が続いたとき）
     func returnToSituationCheck() {
         isGuidancePaused = true
-        startGuidanceButton.isHidden = false
         abortConfirmationDeadline = nil
         noSeatMonitor.reset()
         directionHaptics.stop()

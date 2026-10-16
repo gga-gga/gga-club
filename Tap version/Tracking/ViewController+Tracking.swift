@@ -17,7 +17,7 @@ struct TrackingStepResult {
     var target: Track?
     /// 確定済みのトラック（3Dラベル・一覧表示用）
     var confirmedTracks: [Track] = []
-    var shouldShowArrivalPanel = false
+    var shouldBeginArrival = false
     /// 確定済みで空席と判定されている席の数（重複なし）
     var availableSeatCount = 0
     /// 直近の推論で1画面に映った人数と、状況確認中のその最大値
@@ -43,7 +43,7 @@ extension ViewController {
                horizontalDistance(from: cameraPosition, to: target) <= arrivalThresholdMeters {
                 seatTracker.markArrivalAnnounced(target.id)
                 if askExitOnArrivalEnabled {
-                    result.shouldShowArrivalPanel = true
+                    result.shouldBeginArrival = true
                 }
             }
 

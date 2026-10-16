@@ -12,6 +12,10 @@
 //  | 誘導中                 | 今の方向と距離をすぐ読み上げる   | 中断の確認 → 10秒以内にもう一度3回で中断    |
 //  | 到着時                 | 案内を続ける                  | 終了する                                  |
 //
+//  背面タップを設定していない端末のための予備として、VoiceOver のジェスチャも同じ扱いにする。
+//   - マジックタップ（2本指でダブルタップ）＝3回タップ
+//   - エスケープ（2本指でZを描く）＝2回タップ
+//
 
 import UIKit
 
@@ -26,9 +30,9 @@ extension ViewController: ShortcutActionHandling {
         if isAwaitingArrivalDecision {
             switch action {
             case .primary:
-                onTapArrivalFinish(arrivalFinishButton)
+                finishAtArrival()
             case .secondary:
-                onTapArrivalContinue(arrivalContinueButton)
+                continueAfterArrival()
                 interruptAndSpeak(text: "案内を続けます。")
             }
             return
@@ -60,7 +64,7 @@ extension ViewController: ShortcutActionHandling {
         case .primary:
             let seatCount = stateQueue.sync { seatTracker.availableSeatCount }
             if seatCount > 0 {
-                onTapStartGuidance(startGuidanceButton)
+                startGuidance()
             } else {
                 interruptAndSpeak(text: "空席がないため、誘導を開始できません。もう一度確認するには、背面を2回タップしてください。")
             }

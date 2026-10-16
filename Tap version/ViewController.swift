@@ -2,7 +2,7 @@
 //  SUWARERU
 //  Created by Sugitani on 2026/01/15.
 //
-//  空席ナビ画面の司令塔。ここにはライフサイクル、毎フレームの処理の順序、ボタン操作だけを置き、
+//  空席ナビ画面の司令塔。ここにはライフサイクル、毎フレームの処理の順序、案内の開始・到着・終了だけを置き、
 //  各機能の実体は以下に分けている:
 //    Detection/     YOLOによる検出と空席判定、推論ループ
 //    Localization/  画面上の点 → 3Dワールド座標
@@ -19,14 +19,10 @@ import AVFoundation
 final class ViewController: UIViewController, ARSCNViewDelegate {
 
     // MARK: - IBOutlets
+    // ボタンと到着パネルは廃止した（操作はすべて背面タップ。予備として VoiceOver のジェスチャ）
     @IBOutlet weak var sceneView: ARSCNView!
     @IBOutlet weak var debugTextView: UITextView!
     @IBOutlet weak var TextView: UITextView!
-    @IBOutlet weak var arrivalPanelView: UIView!
-    @IBOutlet weak var startGuidanceButton: UIButton!
-    @IBOutlet weak var arrivalContinueButton: UIButton!
-    @IBOutlet weak var arrivalFinishButton: UIButton!
-    @IBOutlet weak var exitButton: UIButton!
 
     // MARK: - 機能モジュール
     var seatDetector: SeatDetector!
@@ -63,12 +59,12 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
     var latestGuidance: TargetGuidance?
     // 誘導中の中断の確認：この時刻までにもう一度3回タップされたら中断する（ViewController+BackTap）
     var abortConfirmationDeadline: TimeInterval?
-    // 到着パネル表示中（ボタン待ち）のとき true
+    // 到着後、「終了／続ける」の背面タップを待っているとき true
     var isAwaitingArrivalDecision = false
-    // パネル表示中に案内を繰り返すためのタイマー
-    var arrivalPanelRepeatTimer: Timer?
+    // 選択を待つ間に案内を繰り返すためのタイマー
+    var arrivalGuideRepeatTimer: Timer?
     // 何秒おきに繰り返すか
-    let arrivalPanelRepeatInterval: TimeInterval = 10.0
+    let arrivalGuideRepeatInterval: TimeInterval = 10.0
     // 終了処理中（「お疲れ様でした」再生〜画面を閉じるまで）は true
     var isFinishingNavigation = false
 
@@ -135,7 +131,6 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
         self.displayOrientation = currentInterfaceOrientation()
         // 連続推論ループ開始
         self.startCoreMLLoopIfNeeded()
-        startGuidanceButton.isHidden = !isGuidancePaused
         if isGuidancePaused {
             startSituationCheckIfNeeded()
         }
@@ -250,8 +245,8 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
                 self.TextView.text = trackList
                 self.TextView.accessibilityValue = trackList
             }
-            if step.shouldShowArrivalPanel {
-                self.showArrivalPanel()
+            if step.shouldBeginArrival {
+                self.beginArrivalDecision()
             }
             self.latestGuidance = guidance
             self.updateTrackingStabilityNotice(quality: trackingQuality, now: CACurrentMediaTime())
@@ -281,21 +276,16 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
     }
 
     // MARK: - 案内開始・中断・終了
-    @IBAction func onExit(_ sender: UIButton) {
-        prepareForExit()
-        transitionToStartViewController()
-    }
-
     func prepareForExit() {
         // 終了処理中
         isFinishingNavigation = true
 
-        // パネル表示中なら解除
+        // 到着時の選択待ちなら解除
         isAwaitingArrivalDecision = false
 
         // 繰り返しタイマー停止
-        arrivalPanelRepeatTimer?.invalidate()
-        arrivalPanelRepeatTimer = nil
+        arrivalGuideRepeatTimer?.invalidate()
+        arrivalGuideRepeatTimer = nil
         noSeatTimer?.invalidate()
         noSeatTimer = nil
         stopSituationCheck()
@@ -310,39 +300,40 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
         sceneView.session.pause()
     }
 
-    // 画面を閉じる
-    func transitionToStartViewController() {
-        if let nav = navigationController {
-            nav.popToRootViewController(animated: true)
-        } else if presentingViewController != nil {
-            dismiss(animated: true, completion: nil)
-        } else {
-            dismiss(animated: true, completion: nil)
-        }
+    // MARK: - VoiceOver のジェスチャ（背面タップの予備。ViewController+BackTap 参照）
+    // extension では override できない場合があるので、クラス本体に置く
+
+    override func accessibilityPerformMagicTap() -> Bool {
+        handleShortcutAction(.primary)
+        return true
     }
 
-    @IBAction func onTapArrivalContinue(_ sender: UIButton) {
-        // パネルを隠してナビ続行
-        arrivalPanelView.isHidden = true
-        // パネルを閉じて、フラグOFF
+    override func accessibilityPerformEscape() -> Bool {
+        handleShortcutAction(.secondary)
+        return true
+    }
+
+    /// 開始画面へ戻る（誘導画面は開始画面から全画面で表示されている）
+    func transitionToStartViewController() {
+        dismiss(animated: true, completion: nil)
+    }
+
+    /// 到着時に「続ける」を選んだ
+    func continueAfterArrival() {
         isAwaitingArrivalDecision = false
         updateAccessibilityForCurrentState()
-        // タイマー停止
-        arrivalPanelRepeatTimer?.invalidate()
-        arrivalPanelRepeatTimer = nil
+        arrivalGuideRepeatTimer?.invalidate()
+        arrivalGuideRepeatTimer = nil
     }
 
-    @IBAction func onTapArrivalFinish(_ sender: UIButton) {
+    /// 到着時に「終了」を選んだ
+    func finishAtArrival() {
         // 終了処理中フラグON（この間は他の案内は一切禁止）
         isFinishingNavigation = true
-        // 到着パネル待ち終了
         isAwaitingArrivalDecision = false
-        // パネルを隠す
-        arrivalPanelView.isHidden = true
         updateAccessibilityForCurrentState()
-        // タイマー停止
-        arrivalPanelRepeatTimer?.invalidate()
-        arrivalPanelRepeatTimer = nil
+        arrivalGuideRepeatTimer?.invalidate()
+        arrivalGuideRepeatTimer = nil
 
         // 「お疲れ様でした。」を読み上げ（それまでの音声は止めてから話す）
         speakFinishGreeting()
@@ -351,25 +342,18 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
         let delay: TimeInterval = 2.2   // 実際の長さに合わせて調整
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
             guard let self = self else { return }
-
-            self.stopAllTTS()
-            self.sceneView.session.pause()
-
-            if let nav = self.navigationController {
-                nav.popViewController(animated: true)
-            } else {
-                self.dismiss(animated: true, completion: nil)
-            }
+            self.prepareForExit()
+            self.transitionToStartViewController()
         }
     }
 
-    @IBAction func onTapStartGuidance(_ sender: UIButton) {
+    /// 誘導を開始する（状況確認の結果の後、背面タップ3回）
+    func startGuidance() {
         // 状況確認で見回している間が候補を集める時間にあたるので、待たずに最も近い空席を選ばせる
         stateQueue.sync {
             seatTracker.requestImmediateSelection()
         }
         isGuidancePaused = false
-        startGuidanceButton.isHidden = true
         abortConfirmationDeadline = nil
         stopSituationCheck()
         updateAccessibilityForCurrentState()
@@ -381,41 +365,36 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
         speakGuidanceStart()
     }
 
-    func showArrivalPanel() {
+    /// 到着：振動で知らせ、「終了（3回）／続ける（2回）」の選択を背面タップで待つ
+    func beginArrivalDecision() {
         DispatchQueue.main.async {
-            // パネル待ち中フラグON
             self.isAwaitingArrivalDecision = true
-
-            // パネルを表示
-            self.arrivalPanelView.isHidden = false
             self.updateAccessibilityForCurrentState()
             self.arrivalFeedback.notificationOccurred(.success)
-            // VoiceOver への画面切り替えの通知は出さない（VoiceOver がパネルを読み上げ、
-            // 下の到着の案内と声が重なるため）
 
-            let situationCheckAnnouncementDelay: TimeInterval = 1.5
-            DispatchQueue.main.asyncAfter(deadline: .now() + situationCheckAnnouncementDelay) { [weak self] in
-                self?.speakArrivalPanelGuide()
+            let arrivalGuideDelay: TimeInterval = 1.5
+            DispatchQueue.main.asyncAfter(deadline: .now() + arrivalGuideDelay) { [weak self] in
+                self?.speakArrivalGuide()
             }
 
             // すでにタイマーが動いていたら止める
-            self.arrivalPanelRepeatTimer?.invalidate()
+            self.arrivalGuideRepeatTimer?.invalidate()
 
             // 10秒おきに繰り返し案内するタイマーをスタート
-            self.arrivalPanelRepeatTimer = Timer.scheduledTimer(
-                withTimeInterval: self.arrivalPanelRepeatInterval,
+            self.arrivalGuideRepeatTimer = Timer.scheduledTimer(
+                withTimeInterval: self.arrivalGuideRepeatInterval,
                 repeats: true
             ) { [weak self] _ in
                 guard let self = self else { return }
 
-                // すでにパネルが閉じられていたら何もしない
+                // すでに選択済みなら何もしない
                 guard self.isAwaitingArrivalDecision else { return }
 
                 // すでに何かしゃべっている最中ならスキップ（キューに溜めない）
                 if self.speechOutput.isBusy { return }
 
-                // 再度、ボタンの位置案内をしゃべる
-                self.speakArrivalPanelGuide()
+                // 再度、選び方を案内する
+                self.speakArrivalGuide()
             }
         }
     }

@@ -108,7 +108,7 @@ extension ViewController {
         returnToSituationCheck()
     }
 
-    func speakArrivalPanelGuide() {
+    func speakArrivalGuide() {
         if isGuidancePaused { return }
         interruptAndSpeak(text: "空席に到着しました。ナビを終了するには背面を3回、案内を続けるには背面を2回タップしてください。")
     }
