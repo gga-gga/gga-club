@@ -35,7 +35,7 @@ extension ViewController {
         // 推論・BBoxの画面変換・3D位置の推定は、すべてこの1枚のフレームで行う
         // （以前は3D位置だけ最大0.4秒後の別フレームの深度から求めていた）
         guard let frame = sceneView.session.currentFrame else { return }
-        let orientation = ViewController.cgImageOrientationForDevice()
+        let orientation = cgImageOrientationForDevice()
         guard let observations = seatDetector.detect(in: frame.capturedImage, orientation: orientation) else { return }
         handleDetectionResults(observations, orientation: orientation, frame: frame)
     }
@@ -146,21 +146,24 @@ extension ViewController {
         }
     }
 
-    static func cgImageOrientationForDevice() -> CGImagePropertyOrientation {
+    /// 推論に渡す画像の向き（推論スレッドから呼ぶ）。
+    /// 端末の向きが分からない（画面を上・下に向けている等）ときは、メインスレッドで保存しておいた
+    /// 画面の向き（displayOrientation）を使う。以前はここで UIApplication / UIWindowScene を
+    /// 推論スレッドから触っていた（メインスレッド専用のAPIのため実行時に警告が出ていた）。
+    func cgImageOrientationForDevice() -> CGImagePropertyOrientation {
         switch UIDevice.current.orientation {
         case .portrait: return .right
         case .portraitUpsideDown: return .left
-        case .landscapeLeft: return .up
+        case .landscapeLeft: return .up      // 端末の左側が上＝ホームボタン（下端）が右
         case .landscapeRight: return .down
         default:
-            let o = UIApplication.shared.connectedScenes
-                .compactMap { $0 as? UIWindowScene }
-                .first?.interfaceOrientation
-            switch o {
+            // 画面（インターフェース）の向きは、端末の向きと横向きの左右の呼び方が逆になる。
+            // 以前はここを端末の向きと同じ対応にしていたため、横向きのときに上下が逆になっていた
+            switch displayOrientation {
             case .portrait: return .right
             case .portraitUpsideDown: return .left
-            case .landscapeLeft: return .up
-            case .landscapeRight: return .down
+            case .landscapeRight: return .up
+            case .landscapeLeft: return .down
             default: return .right
             }
         }
