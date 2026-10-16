@@ -2,7 +2,7 @@
 //  SpeechOutput.swift
 //  SUWARERU
 //
-//  音声合成（TTS）と効果音の再生。何をいつ話すかは ViewController+Speech が決める。
+//  音声合成（TTS）と効果音の再生。何をいつ話すかは ViewController+Speech が決める（メインスレッドで使う）。
 //
 //  VoiceOver が有効でも、案内はすべてここ（アプリ自身の音声合成）で話す。
 //  VoiceOver のアナウンスに回すと、VoiceOver 自身の読み上げ（フォーカス移動・ヒント等）と
@@ -11,14 +11,28 @@
 
 import AVFoundation
 import Foundation
+import QuartzCore
 
-final class SpeechOutput {
+final class SpeechOutput: NSObject, AVSpeechSynthesizerDelegate {
     private let synthesizer = AVSpeechSynthesizer()
     private var sfxPlayer: AVAudioPlayer?
 
-    var isSpeaking: Bool { synthesizer.isSpeaking }
+    /// 効果音を鳴らし終えて発話を始めるのを待っている間 true
+    private var isPlayingSFX = false
+    /// stop() のたびに進める番号。止める前に予約された「効果音のあとの発話」を取り消すのに使う
+    private var generation = 0
+    /// 最後に発話が終わった（または止められた）時刻
+    private(set) var lastSpeechEndedAt: TimeInterval = 0
 
-    init() {
+    /// 発話中、または効果音のあとの発話を待っている間
+    var isBusy: Bool { synthesizer.isSpeaking || isPlayingSFX }
+
+    /// 最後の発話が終わってからの秒数
+    var secondsSinceLastSpeech: TimeInterval { CACurrentMediaTime() - lastSpeechEndedAt }
+
+    override init() {
+        super.init()
+        synthesizer.delegate = self
         configureAudioSession()
     }
 
@@ -29,7 +43,12 @@ final class SpeechOutput {
     private func configureAudioSession() {
         let session = AVAudioSession.sharedInstance()
         do {
-            try session.setCategory(.playback, mode: .voicePrompt, options: [.mixWithOthers])
+            // プロジェクトの Swift のバージョン設定によって API の名前が違うため、両方に対応する
+            #if swift(>=4.2)
+            try session.setCategory(.playback, mode: .default, options: [.mixWithOthers])
+            #else
+            try session.setCategory(AVAudioSessionCategoryPlayback, mode: AVAudioSessionModeDefault, options: [.mixWithOthers])
+            #endif
             try session.setActive(true)
         } catch {
             print("AVAudioSession setup error:", error)
@@ -57,15 +76,23 @@ final class SpeechOutput {
         synthesizer.speak(utterance)
     }
 
-    /// 話している内容・キューを即座に破棄する
+    /// 話している内容・キュー・効果音のあとに予約された発話を、すべて即座に破棄する
     func stop() {
+        generation += 1
+        isPlayingSFX = false
+        sfxPlayer?.stop()
         synthesizer.stopSpeaking(at: .immediate)
     }
 
     /// 効果音 → 発話 の順
     func speakWithSFX(_ utterance: AVSpeechUtterance) {
+        let token = generation
+        isPlayingSFX = true
         playSFX(named: "NaviSound01.mp3") { [weak self] in
-            self?.synthesizer.speak(utterance)
+            // 効果音の間に stop() されていたら、この発話は取り消されている
+            guard let self = self, self.generation == token else { return }
+            self.isPlayingSFX = false
+            self.synthesizer.speak(utterance)
         }
     }
 
@@ -93,5 +120,15 @@ final class SpeechOutput {
             print("Error loading SFX: \(error)")
             completion?()
         }
+    }
+
+    // MARK: - AVSpeechSynthesizerDelegate
+
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didFinish utterance: AVSpeechUtterance) {
+        lastSpeechEndedAt = CACurrentMediaTime()
+    }
+
+    func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
+        lastSpeechEndedAt = CACurrentMediaTime()
     }
 }

@@ -2,9 +2,11 @@
 //  ViewController+Speech.swift
 //  SUWARERU
 //
-//  何をいつ読み上げるか（空席の方向・距離、空席なし警告、到着、終了）。
+//  何をいつ読み上げるか（空席の方向・距離、空席なし警告、到着、終了）。メインスレッドから呼ぶこと。
 //  VoiceOver が有効でも、すべてアプリ自身の音声合成（SpeechOutput）で話す。
 //  （VoiceOver のアナウンスに回すと、VoiceOver 自身の読み上げに途中で切られるため）
+//
+//  背面タップの案内は「3回＝決定・はい」「2回＝もう一度・いいえ」（ShortcutAction 参照）。
 //
 
 import AVFoundation
@@ -12,49 +14,42 @@ import UIKit
 import simd
 
 extension ViewController {
-    /// いま話している内容やキューを全部止めて、すぐ新しいテキストを読み上げる
+    /// 案内（方向と距離）の繰り返しの間隔：前の発話が「終わってから」この秒数あける。
+    /// 以前は前の発話を「始めてから」3秒だったため、案内文（3秒以上かかる）がほぼ途切れず続いていた
+    static let guidanceIntervalAfterSpeech: TimeInterval = 1.5
+
+    /// いま話している内容やキューを全部止めて、効果音のあとに新しいテキストを読み上げる
     func interruptAndSpeak(text: String,
-                           rate: Float = AVSpeechUtteranceDefaultSpeechRate * 1.0,
-                           pitch: Float = 1.0,
+                           rate: Float = AVSpeechUtteranceDefaultSpeechRate * 1.1,
+                           pitch: Float = 0.9,
                            volume: Float = 1.0) {
-        // しゃべっていたら即停止（キューも含めて破棄）
         speechOutput.stop()
-        // クールダウン管理をしているなら、ここでリセットしておく
-        lastSpokenAt.removeAll()
-
         let utt = speechOutput.makeUtterance(text, rate: rate, pitch: pitch, volume: volume)
-
-        DispatchQueue.main.async { [weak self] in
-            self?.speechOutput.speakWithSFX(utt)
-        }
+        speechOutput.speakWithSFX(utt)
     }
 
-    /// 案内先の方向と距離を読み上げる（メインスレッドから呼ぶ）。
-    /// 前回から ttsCooldownSeconds 経っていなければ何もしない
+    /// 案内先の方向と距離を読み上げる。何か話している間と、前の発話が終わってから
+    /// guidanceIntervalAfterSpeech 経っていない間は何もしない
     func speak(guidance: TargetGuidance) {
-        // 終了処理中／到着パネル表示中はナビ音声を出さない
+        // 終了処理中／到着パネル表示中／状況確認中はナビ音声を出さない
         if isFinishingNavigation || isAwaitingArrivalDecision || isGuidancePaused {
             return
         }
+        // 誘導開始の案内や「空席が埋まりました」などを話している間は割り込まない
+        if speechOutput.isBusy { return }
+        if speechOutput.secondsSinceLastSpeech < Self.guidanceIntervalAfterSpeech { return }
 
-        let now = CACurrentMediaTime()
-        // クールダウン（あまり頻度が高すぎないように）
-        if let last = lastSpokenAt[guidance.trackID],
-           now - last < ttsCooldownSeconds {
-            return
+        speechOutput.speak(speechOutput.makeUtterance(guidanceSentence(for: guidance)))
+    }
+
+    /// 背面タップ（2回）で、今の方向と距離をすぐに読み上げる
+    func speakGuidanceNow() {
+        speechOutput.stop()
+        if let guidance = latestGuidance {
+            speechOutput.speak(speechOutput.makeUtterance(guidanceSentence(for: guidance)))
+        } else {
+            speechOutput.speak(speechOutput.makeUtterance("案内できる空席を探しています。"))
         }
-
-        // ★ すでに何かしゃべっている最中ならスキップする
-        if speechOutput.isSpeaking { return }
-
-        lastSpokenAt[guidance.trackID] = now
-
-        let sentence = guidanceSentence(for: guidance)
-        let utt = speechOutput.makeUtterance(sentence,
-                                             rate: AVSpeechUtteranceDefaultSpeechRate * 1.1,
-                                             pitch: 0.9,
-                                             volume: 1.0)
-        speechOutput.speak(utt)
     }
 
     /// 案内の読み上げ文。後ろ（90°以上）のときは振動を止めているので、言葉で後ろだと伝える
@@ -72,6 +67,11 @@ extension ViewController {
         return "\(head)、\(direction)、\(distance)"
     }
 
+    /// 誘導開始の案内。言い終わってから方向の案内が始まる（speak(guidance:) が待つ）
+    func speakGuidanceStart() {
+        interruptAndSpeak(text: "空席への誘導を開始します。方向をもう一度聞くには背面を2回、中断するには3回タップしてください。")
+    }
+
     /// 案内先を失った・切り替えたことを、理由と合わせて伝える
     func announceTargetEvent(_ event: TargetEvent) {
         if isFinishingNavigation || isAwaitingArrivalDecision || isGuidancePaused { return }
@@ -85,12 +85,7 @@ extension ViewController {
         case .selected, .unchanged:
             return
         }
-        interruptAndSpeak(
-            text: text,
-            rate: AVSpeechUtteranceDefaultSpeechRate * 1.1,
-            pitch: 0.9,
-            volume: 1.0
-        )
+        interruptAndSpeak(text: text)
     }
 
     private func targetLossPhrase(_ reason: TargetLossReason) -> String {
@@ -100,75 +95,30 @@ extension ViewController {
         }
     }
 
+    /// 誘導中に案内できる空席がない状態が続いたとき（1回目）
     func speakNoSeatWarning() {
-        // パネル中はしゃべらない
         if isAwaitingArrivalDecision || isGuidancePaused { return }
-        interruptAndSpeak(
-            text: "空席が消失しました。カメラで左右を写して空席を探してください。",
-            rate: AVSpeechUtteranceDefaultSpeechRate * 1.1,
-            pitch: 0.9,
-            volume: 1.0
-        )
+        interruptAndSpeak(text: "案内できる空席が見つかりません。体の向きをゆっくり変えて、周囲を確認してください。")
+    }
+
+    /// 誘導中に案内できる空席がない状態がさらに続いたとき：開始画面へ戻らず、状況確認からやり直す
+    func speakNoSeatAndRestartSituationCheck() {
+        if isAwaitingArrivalDecision || isGuidancePaused { return }
+        interruptAndSpeak(text: "空席が見つかりませんでした。状況確認からやり直します。体ごと、ゆっくり左右に向きを変えてください。")
+        returnToSituationCheck()
     }
 
     func speakArrivalPanelGuide() {
         if isGuidancePaused { return }
-        let utt = speechOutput.makeUtterance(
-            "空席に到着しました。ナビを終了しますか？終了するには画面左側、続けるには画面右側をタップしてください。",
-            rate: AVSpeechUtteranceDefaultSpeechRate * 1.1,
-            pitch: 0.9,
-            volume: 1.0
-        )
-        DispatchQueue.main.async { [weak self] in
-            self?.speechOutput.speakWithSFX(utt)
-        }
-    }
-
-    func speakNoSeatFinalAndExit() {
-        if isAwaitingArrivalDecision || isGuidancePaused { return }
-        let text = "空席が見つかりませんでした。空席ナビを終了します。"
-        let utt = speechOutput.makeUtterance(text,
-                                             rate: AVSpeechUtteranceDefaultSpeechRate * 1.1,
-                                             pitch: 0.9,
-                                             volume: 1.0)
-
-        DispatchQueue.main.async { [weak self] in
-            guard let self = self else { return }
-
-            // いま話しているもの＆キューを即座に止める（割り込み）
-            self.speechOutput.stop()
-            // クールダウン管理しているなら、リセットしておくと安全
-            self.lastSpokenAt.removeAll()
-
-            // 終了アナウンスを新しく再生
-            self.speechOutput.speak(utt)
-
-            // 少し待ってから自動終了（テキストの長さに合わせて調整）
-            let delay: TimeInterval = 4.0
-            DispatchQueue.main.asyncAfter(deadline: .now() + delay) { [weak self] in
-                guard let self = self else { return }
-
-                self.stopAllTTS()
-                self.sceneView.session.pause()
-                self.transitionToStartViewController()
-            }
-        }
+        interruptAndSpeak(text: "空席に到着しました。ナビを終了するには背面を3回、案内を続けるには背面を2回タップしてください。")
     }
 
     func speakFinishGreeting() {
-        interruptAndSpeak(
-            text: "お疲れ様でした。",
-            rate: AVSpeechUtteranceDefaultSpeechRate * 1.1,
-            pitch: 0.9,
-            volume: 1.0
-        )
+        interruptAndSpeak(text: "お疲れ様でした。")
     }
 
     func stopAllTTS() {
-        // ただちに読み上げを止める（キューに入ってる分も含めて）
+        // ただちに読み上げを止める（キューと、効果音のあとに予約された発話も含めて）
         speechOutput.stop()
-
-        // クールダウン管理用の履歴もリセットしておく
-        lastSpokenAt.removeAll()
     }
 }

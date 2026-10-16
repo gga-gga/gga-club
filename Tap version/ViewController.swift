@@ -43,7 +43,6 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
     var displayOrientation: UIInterfaceOrientation = .portrait // 同上（画面座標への変換に使う）
 
     var isGuidancePaused = true
-    var shouldStartGuidanceOnAppear = false
 
     // MARK: - CoreML / Vision
     let dispatchQueueML = DispatchQueue(label: "com.hw.dispatchqueueml")
@@ -60,10 +59,10 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
     var trackNodes: [UUID: SCNNode] = [:]
 
     // ======= 音声案内（TTS）関連 =======
-    // 案内先の繰り返し読み上げの間隔（秒）
-    var ttsCooldownSeconds: TimeInterval = 3.0
-    // Trackごとの最終発話時刻
-    var lastSpokenAt: [UUID: TimeInterval] = [:]
+    // 背面タップ（2回）ですぐ読み上げるための、直近の案内先の方向と距離（メインスレッドで更新）
+    var latestGuidance: TargetGuidance?
+    // 誘導中の中断の確認：この時刻までにもう一度3回タップされたら中断する（ViewController+BackTap）
+    var abortConfirmationDeadline: TimeInterval?
     // 到着パネル表示中（ボタン待ち）のとき true
     var isAwaitingArrivalDecision = false
     // パネル表示中に案内を繰り返すためのタイマー
@@ -95,10 +94,6 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
     /// 歩いてきた場所のセル（経路計画で、未観測でも通れるとみなす。描画スレッドだけで触る）
     var walkedCells: Set<GridCoordinate> = []
 
-    deinit {
-        NotificationCenter.default.removeObserver(self)
-    }
-
     // MARK: - Life Cycle
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -119,12 +114,6 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
         configureAccessibility()
         directionHaptics.prepare()
         arrivalFeedback.prepare()
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleShortcutStartGuidance),
-            name: ShortcutAction.startGuidance.notificationName,
-            object: nil
-        )
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -135,17 +124,11 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
         // 連続推論ループ開始
         self.startCoreMLLoopIfNeeded()
         startGuidanceButton.isHidden = !isGuidancePaused
-        if shouldStartGuidanceOnAppear {
-            shouldStartGuidanceOnAppear = false
-            handleShortcutStartGuidance()
-        }
-        if ShortcutActionCenter.shared.consume(.startGuidance) {
-            handleShortcutStartGuidance()
-        }
-        startGuidanceButton.isHidden = !isGuidancePaused
         if isGuidancePaused {
             startSituationCheckIfNeeded()
         }
+        // 背面タップはこの画面が表示されている間だけ受け取る（ViewController+BackTap）
+        ShortcutActionCenter.shared.setHandler(self)
     }
 
     override func viewWillAppear(_ animated: Bool) {
@@ -183,6 +166,7 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        ShortcutActionCenter.shared.clearHandler(self)
 
         // Timer 停止
         noSeatTimer?.invalidate()
@@ -253,6 +237,7 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
             if step.shouldShowArrivalPanel {
                 self.showArrivalPanel()
             }
+            self.latestGuidance = guidance
             self.updateDirectionHaptics(for: guidance)
 
             guard !self.isGuidancePaused else { return }
@@ -284,7 +269,7 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
         transitionToStartViewController()
     }
 
-    private func prepareForExit() {
+    func prepareForExit() {
         // 終了処理中
         isFinishingNavigation = true
 
@@ -303,7 +288,6 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
 
         // 音声を即停止
         speechOutput.stop()
-        lastSpokenAt.removeAll()
 
         // ARセッション停止
         sceneView.session.pause()
@@ -343,12 +327,7 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
         arrivalPanelRepeatTimer?.invalidate()
         arrivalPanelRepeatTimer = nil
 
-        // それまで再生中 or キューにたまっている音声を一旦全部止める
-        speechOutput.stop()
-        // ナビ用のクールダウン管理もリセット
-        lastSpokenAt.removeAll()
-
-        // 「お疲れ様でした。」を読み上げ
+        // 「お疲れ様でした。」を読み上げ（それまでの音声は止めてから話す）
         speakFinishGreeting()
 
         // 読み上げが終わるタイミングでナビ終了処理
@@ -374,26 +353,15 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
         }
         isGuidancePaused = false
         startGuidanceButton.isHidden = true
+        abortConfirmationDeadline = nil
         stopSituationCheck()
         updateAccessibilityForCurrentState()
 
         noSeatMonitor.startCounting(at: CACurrentMediaTime())
 
-        let situationCheckAnnouncementDelay: TimeInterval = 1.5
-        DispatchQueue.main.asyncAfter(deadline: .now() + situationCheckAnnouncementDelay) { [weak self] in
-            self?.interruptAndSpeak(
-                text: "空席への誘導を開始します。",
-                rate: AVSpeechUtteranceDefaultSpeechRate * 1.1,
-                pitch: 0.9,
-                volume: 1.0
-            )
-        }
-    }
-
-    @objc private func handleShortcutStartGuidance() {
-        guard isViewLoaded else { return }
-        guard startGuidanceButton.isHidden == false else { return }
-        onTapStartGuidance(startGuidanceButton)
+        // 開始の案内を先に話す。方向の案内は、これを言い終わってから始まる（speak(guidance:) が待つ）。
+        // 以前は 1.5秒遅れて話していたため、先に始まった方向の案内を途中で止めていた
+        speakGuidanceStart()
     }
 
     func showArrivalPanel() {
@@ -427,7 +395,7 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
                 guard self.isAwaitingArrivalDecision else { return }
 
                 // すでに何かしゃべっている最中ならスキップ（キューに溜めない）
-                if self.speechOutput.isSpeaking { return }
+                if self.speechOutput.isBusy { return }
 
                 // 再度、ボタンの位置案内をしゃべる
                 self.speakArrivalPanelGuide()

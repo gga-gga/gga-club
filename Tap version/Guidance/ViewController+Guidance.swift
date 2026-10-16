@@ -76,7 +76,7 @@ extension ViewController {
         case .firstWarning:
             speakNoSeatWarning()
         case .finalWarning:
-            speakNoSeatFinalAndExit()
+            speakNoSeatAndRestartSituationCheck()
         case .idle:
             break
         }
@@ -114,13 +114,14 @@ extension ViewController {
     /// 状況確認の終了：結果を読み上げる。床を一度も推定できていなければ、空席の有無を判断できない
     /// （座面の推定に床の高さが必要なため、空席があっても0席になる）ので、「空席なし」とは言わずにやり直す
     private func finishSituationCheck() {
-        let summary: String? = stateQueue.sync { () -> String? in
+        let result: (summary: String, seatCount: Int)? = stateQueue.sync { () -> (summary: String, seatCount: Int)? in
             isSituationCheckInProgress = false
             guard latestFloorY != nil else { return nil }
-            return situationTally.summaryText(seatCount: seatTracker.availableSeatCount)
+            let seatCount = seatTracker.availableSeatCount
+            return (situationTally.summaryText(seatCount: seatCount), seatCount)
         }
 
-        guard let summary else {
+        guard let result = result else {
             interruptAndSpeak(
                 text: "周囲の床を確認できなかったため、空席を数えられませんでした。もう一度確認します。少し離れた床が見えるように、ゆっくり周囲を見回してください。",
                 rate: AVSpeechUtteranceDefaultSpeechRate * 1.1,
@@ -131,12 +132,23 @@ extension ViewController {
             return
         }
 
-        interruptAndSpeak(
-            text: "\(summary)背面を3回タップして案内を開始してください。",
-            rate: AVSpeechUtteranceDefaultSpeechRate * 1.1,
-            pitch: 0.9,
-            volume: 1.0
-        )
+        // 背面タップ：3回＝誘導を開始、2回＝もう一度確認（ViewController+BackTap）。
+        // 空席が無いときは誘導を始められないので、やり直し方だけを伝える
+        let prompt = result.seatCount > 0
+            ? "誘導を開始するには背面を3回、もう一度確認するには2回タップしてください。"
+            : "もう一度確認するには、背面を2回タップしてください。"
+        interruptAndSpeak(text: result.summary + prompt)
+    }
+
+    /// 誘導を止めて、状況確認からやり直す（誘導中に空席が見つからない状態が続いたとき）
+    func returnToSituationCheck() {
+        isGuidancePaused = true
+        startGuidanceButton.isHidden = false
+        abortConfirmationDeadline = nil
+        noSeatMonitor.reset()
+        directionHaptics.stop()
+        updateAccessibilityForCurrentState()
+        startSituationCheckIfNeeded(announcesStart: false)
     }
 
     func stopSituationCheck() {
