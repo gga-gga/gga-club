@@ -119,6 +119,7 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
 
         // Vision / CoreML セットアップ
         seatDetector = SeatDetector()
+        configureDebugTextViews()
         configureAccessibility()
         directionHaptics.prepare()
         arrivalFeedback.prepare()
@@ -298,6 +299,16 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
 
         // ARセッション停止
         sceneView.session.pause()
+    }
+
+    /// デバッグ表示の2つのテキスト欄は表示専用にする。UITextView は初期設定では編集できるので、
+    /// 画面に触れるとキーボードが出てしまっていた。触れても何も起きないようにする
+    private func configureDebugTextViews() {
+        for textView in [debugTextView, TextView] {
+            textView?.isEditable = false
+            textView?.isSelectable = false
+            textView?.isUserInteractionEnabled = false
+        }
     }
 
     // MARK: - VoiceOver のジェスチャ（背面タップの予備。ViewController+BackTap 参照）
