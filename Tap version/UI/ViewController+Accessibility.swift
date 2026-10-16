@@ -20,7 +20,6 @@ extension ViewController {
         // 画面全体＝カメラ映像の1要素だけを VoiceOver に見せる。
         // 画面に入ったときや、画面に触れたときに読まれるのはこの短い説明だけになる
         sceneView.isAccessibilityElement = true
-        sceneView.accessibilityTraits = []
         view.accessibilityElements = [sceneView as Any]
         updateAccessibilityForCurrentState()
     }
