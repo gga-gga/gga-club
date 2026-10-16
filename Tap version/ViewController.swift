@@ -35,6 +35,11 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
     let autoLabelsRoot = SCNNode() // 自動ラベルの親ノード
     var bboxOverlay: BoundingBoxOverlayView!
     var pathVisualizer: PathVisualizer!   // デバッグ用：経路を床の上に表示（描画スレッドだけで触る）
+    // デバッグ用：カメラ映像と OGM の2D地図の切り替え（ViewController+OGMMap）
+    var ogmMapView: OGMMapView!
+    let mapToggleButton = UIButton(type: .system)
+    /// メインスレッドで切り替え、描画スレッドが「地図のデータを作るか」の判断に読む
+    var isShowingOGMMap = false
     var viewSize: CGSize = .zero // メインでのみ更新（BGからUIViewを触らない）
     var displayOrientation: UIInterfaceOrientation = .portrait // 同上（画面座標への変換に使う）
 
@@ -120,6 +125,7 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
         // Vision / CoreML セットアップ
         seatDetector = SeatDetector()
         configureDebugTextViews()
+        setupOGMMapToggle()
         configureAccessibility()
         directionHaptics.prepare()
         arrivalFeedback.prepare()
@@ -230,6 +236,11 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
         let guidance = step.target.map {
             TargetGuidance(target: $0, cameraTransform: m, steeringPoint: plan.steeringPoint)
         }
+        // OGM の地図を表示しているときだけ、地図の描画データを作る
+        let mapSnapshot: OGMMapView.Snapshot? = isShowingOGMMap
+            ? makeOGMMapSnapshot(cameraTransform: m, plan: plan,
+                                 confirmedTracks: step.confirmedTracks, targetID: step.target?.id)
+            : nil
 
         // ARKit の位置推定の状態（実車での検証用に表示し、不安定が続けば読み上げで伝える）
         let trackingQuality = ARTrackingQuality(frame.camera.trackingState)
@@ -250,6 +261,9 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
                 self.beginArrivalDecision()
             }
             self.latestGuidance = guidance
+            if let mapSnapshot = mapSnapshot {
+                self.ogmMapView.update(mapSnapshot)
+            }
             self.updateTrackingStabilityNotice(quality: trackingQuality, now: CACurrentMediaTime())
             self.updateDirectionHaptics(for: guidance)
 
