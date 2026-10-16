@@ -13,7 +13,11 @@ import AVFoundation
 import Foundation
 import QuartzCore
 
-final class SpeechOutput: NSObject, AVSpeechSynthesizerDelegate {
+/// メインスレッドだけで使うこと（呼び出し元はすべてメインスレッド、delegate の通知もメインスレッドに届く）。
+/// 新しい SDK では AVSpeechSynthesizerDelegate が Sendable を要求するため、このクラスも Sendable 扱いになるが、
+/// 中の AVSpeechSynthesizer 等は Sendable ではない。スレッドの安全性は上の使い方で保証しているので、
+/// コンパイラの検査は外す（@unchecked Sendable）。
+final class SpeechOutput: NSObject, AVSpeechSynthesizerDelegate, @unchecked Sendable {
     private let synthesizer = AVSpeechSynthesizer()
     private var sfxPlayer: AVAudioPlayer?
 
