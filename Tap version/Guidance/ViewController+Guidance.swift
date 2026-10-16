@@ -105,10 +105,55 @@ extension ViewController {
                 )
             }
         }
+        // 位置推定が正常だった時間だけを数え、situationCheckDuration に達したら終える
+        situationCheckStartedAt = CACurrentMediaTime()
+        situationCheckStableElapsed = 0
         situationCheckTimer?.invalidate()
-        situationCheckTimer = Timer.scheduledTimer(withTimeInterval: situationCheckDuration, repeats: false) { [weak self] _ in
-            self?.finishSituationCheck()
+        situationCheckTimer = Timer.scheduledTimer(withTimeInterval: Self.situationCheckTickInterval, repeats: true) { [weak self] _ in
+            self?.tickSituationCheck()
         }
+    }
+
+    static let situationCheckTickInterval: TimeInterval = 0.25
+
+    private func tickSituationCheck() {
+        let isNormal = stateQueue.sync { trackingQuality.isNormal }
+        if isNormal {
+            situationCheckStableElapsed += Self.situationCheckTickInterval
+        }
+        let timedOut = CACurrentMediaTime() - situationCheckStartedAt >= situationCheckMaxDuration
+        guard situationCheckStableElapsed >= situationCheckDuration || timedOut else { return }
+
+        situationCheckTimer?.invalidate()
+        situationCheckTimer = nil
+        finishSituationCheck()
+    }
+
+    // MARK: - 位置推定が不安定なときの案内
+
+    /// 位置推定が正常でない状態がこの秒数続いたら、ゆっくり動くよう伝える
+    static let trackingUnstableNoticeDelay: TimeInterval = 5.0
+    /// 不安定な状態が続く間は、この間隔で繰り返し伝える
+    static let trackingUnstableNoticeRepeat: TimeInterval = 15.0
+
+    /// メインスレッドから定期的に呼ぶ（renderer の0.4秒ごとの処理）
+    func updateTrackingStabilityNotice(quality: ARTrackingQuality, now: TimeInterval) {
+        if quality.isNormal {
+            trackingUnstableSince = nil
+            lastTrackingUnstableNoticeAt = nil
+            return
+        }
+        let since = trackingUnstableSince ?? now
+        trackingUnstableSince = since
+
+        guard !isFinishingNavigation, !isAwaitingArrivalDecision else { return }
+        guard now - since >= Self.trackingUnstableNoticeDelay else { return }
+        if let last = lastTrackingUnstableNoticeAt, now - last < Self.trackingUnstableNoticeRepeat { return }
+        // 他の案内を話している間は割り込まず、終わってから伝える
+        guard !speechOutput.isBusy else { return }
+
+        lastTrackingUnstableNoticeAt = now
+        speechOutput.speakWithSFX(speechOutput.makeUtterance("周囲の認識が不安定です。ゆっくり動いてください。"))
     }
 
     /// 状況確認の終了：結果を読み上げる。床を一度も推定できていなければ、空席の有無を判断できない

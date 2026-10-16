@@ -84,7 +84,19 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
     var isSituationCheckInProgress = false
     var situationCheckTimer: Timer?
     var situationTally = SituationTally()
+    /// 状況確認の長さ。位置推定が正常だった時間だけで数える（不安定な間は観測を使えないため）
     let situationCheckDuration: TimeInterval = 7.0
+    /// 位置推定がずっと不安定でも、この秒数で状況確認を打ち切る
+    let situationCheckMaxDuration: TimeInterval = 30.0
+    var situationCheckStartedAt: TimeInterval = 0
+    var situationCheckStableElapsed: TimeInterval = 0
+
+    // ======= ARKit の位置推定の状態 =======
+    /// 最新の状態（描画スレッドで更新し、推論スレッド・メインスレッドから読むので stateQueue で保護する）
+    var trackingQuality: ARTrackingQuality = .notAvailable
+    /// 位置推定が不安定になり始めた時刻と、最後に「不安定です」と伝えた時刻（メインスレッドで使う）
+    var trackingUnstableSince: TimeInterval?
+    var lastTrackingUnstableNoticeAt: TimeInterval?
 
     // ======= 占有格子地図（OGM） =======
     let ogmEngine = OGMNavigationEngine()
@@ -221,7 +233,9 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
             TargetGuidance(target: $0, cameraTransform: m, steeringPoint: plan.steeringPoint)
         }
 
-        let planLine = Self.planDebugLine(plan: plan, guidance: guidance)
+        // ARKit の位置推定の状態（実車での検証用に表示し、不安定が続けば読み上げで伝える）
+        let trackingQuality = ARTrackingQuality(frame.camera.trackingState)
+        let planLine = Self.planDebugLine(plan: plan, guidance: guidance) + " | 追跡:" + trackingQuality.debugText
         let statusSummary = "状況確認中\n空席(確定): \(step.availableSeatCount)  人: \(step.currentPersonCount)（最大\(step.maxPersonCount)）\n\(planLine)"
         let trackList = trackListText(confirmedTracks: step.confirmedTracks,
                                       targetID: step.target?.id,
@@ -238,6 +252,7 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
                 self.showArrivalPanel()
             }
             self.latestGuidance = guidance
+            self.updateTrackingStabilityNotice(quality: trackingQuality, now: CACurrentMediaTime())
             self.updateDirectionHaptics(for: guidance)
 
             guard !self.isGuidancePaused else { return }

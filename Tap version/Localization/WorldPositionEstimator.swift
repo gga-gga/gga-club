@@ -66,10 +66,13 @@ enum SeatLocalizationFailure {
     case tooFewPoints(Int)
     /// 座面らしい点が広がりすぎている（他の物が混ざった）
     case tooSpread(lateral: Float, depth: Float)
+    /// ARKit の位置推定が不安定（正常でない）なので推定しない
+    case trackingLimited
 
     var debugText: String {
         switch self {
         case .noFloorEstimate: return "床未推定"
+        case .trackingLimited: return "位置推定が不安定"
         case .noDepth: return "深度なし"
         case .tooFewPoints(let count): return "点不足(\(count))"
         case .tooSpread(let lateral, let depth):

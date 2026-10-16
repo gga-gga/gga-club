@@ -71,10 +71,16 @@ extension ViewController {
                                            displayTransform: displayTransform,
                                            viewSize: viewportSize,
                                            timestamp: now)
-        // 空席候補だけ、同じフレームの深度から座面の3D位置を求めておく
+        // 空席候補だけ、同じフレームの深度から座面の3D位置を求めておく。
+        // そのフレームで ARKit の位置推定が正常でなければ、位置がずれているので推定しない
+        let isTrackingNormal = ARTrackingQuality(frame.camera.trackingState).isNormal
         let floorY = stateQueue.sync { self.latestFloorY }
         let emptyChairs = result.emptyChairs.map { chair -> Detection in
             var chair = chair
+            guard isTrackingNormal else {
+                chair.localization = .failed(.trackingLimited)
+                return chair
+            }
             chair.localization = WorldPositionEstimator.estimatePlacement(for: chair,
                                                                           persons: result.persons,
                                                                           floorY: floorY,
@@ -97,6 +103,9 @@ extension ViewController {
             if self.isSituationCheckInProgress {
                 self.situationTally.record(personCount: result.personCount)
             }
+            // 位置推定が不安定な間は、座席の追跡にも取り込まない
+            // （人が重なったかの判定も、ずれた位置で座席を画面に投影することになるため）
+            guard isTrackingNormal else { return }
             self.seatTracker.integrate(seatPositions: seatPositions,
                                        personRects: personRects,
                                        label: "chair",

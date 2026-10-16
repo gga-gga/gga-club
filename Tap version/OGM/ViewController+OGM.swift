@@ -48,6 +48,14 @@ extension ViewController {
         guard time - lastOGMUpdateTime >= OGMConfig.depthCaptureInterval else { return }
         lastOGMUpdateTime = time
         guard let frame = sceneView.session.currentFrame else { return }
+
+        // 位置推定が正常なときだけ地図に書き込む（ずれた位置で深度を書き込むと誤った占有セルが残る）
+        let quality = ARTrackingQuality(frame.camera.trackingState)
+        stateQueue.sync {
+            self.trackingQuality = quality
+        }
+        guard quality.isNormal else { return }
+
         ogmEngine.update(frame: frame, timestamp: time)
 
         let floorY = ogmEngine.floorY
