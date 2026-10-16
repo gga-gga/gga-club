@@ -54,8 +54,7 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
 
     // ======= トラッキング =======
     var lastProcessTime: TimeInterval = 0
-    // 直近の推論での空席数・人数（stateQueue で保護）
-    var lastEmptySeatCount: Int = 0
+    // 直近の推論で1画面に映った人数（stateQueue で保護）
     var lastPersonCount: Int = 0
     // 確定済みトラックの3Dラベル（描画スレッドだけで触る）
     var trackNodes: [UUID: SCNNode] = [:]
@@ -232,7 +231,7 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
         }
 
         let planLine = Self.planDebugLine(plan: plan, guidance: guidance)
-        let statusSummary = "状況確認中\n空席: \(step.currentEmptySeatCount)  人: \(step.currentPersonCount)\n\(planLine)"
+        let statusSummary = "状況確認中\n空席(確定): \(step.availableSeatCount)  人: \(step.currentPersonCount)（最大\(step.maxPersonCount)）\n\(planLine)"
         let trackList = trackListText(confirmedTracks: step.confirmedTracks,
                                       targetID: step.target?.id,
                                       cameraPosition: cameraPosition) + "\n" + planLine
@@ -362,6 +361,10 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
     }
 
     @IBAction func onTapStartGuidance(_ sender: UIButton) {
+        // 状況確認で見回している間が候補を集める時間にあたるので、待たずに最も近い空席を選ばせる
+        stateQueue.sync {
+            seatTracker.requestImmediateSelection()
+        }
         isGuidancePaused = false
         startGuidanceButton.isHidden = true
         stopSituationCheck()

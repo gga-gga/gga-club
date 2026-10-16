@@ -137,6 +137,16 @@ final class SeatTracker {
     var confirmedTracks: [Track] { tracks.values.filter { $0.isConfirmed } }
     /// 案内できる空席（確定済み・空席判定）が1つでもあるか
     var hasAvailableSeat: Bool { tracks.values.contains { $0.isConfirmed && $0.isEmpty } }
+    /// 案内できる空席（確定済み・空席判定）の数。同じ席は3Dの位置で1つにまとまっているので重複しない
+    var availableSeatCount: Int { tracks.values.filter { $0.isConfirmed && $0.isEmpty }.count }
+
+    /// 次に案内先を選ぶとき、候補を集める待ち時間を省いて、その時点の最も近い空席をすぐ選ぶ。
+    /// 状況確認で周囲を見回した後の案内開始時に使う（見回している間が候補を集める時間にあたるため）
+    private var selectsImmediately = false
+
+    func requestImmediateSelection() {
+        selectsImmediately = true
+    }
 
     /// 1回の推論結果を取り込む。座面の位置と person の BBox は、どちらも同じフレームのもの
     /// - Parameters:
@@ -228,7 +238,15 @@ final class SeatTracker {
         // 最初の案内先：候補が現れてから一定時間集めてから選ぶ
         guard let nearest else {
             selectionWindowStart = nil
+            // 案内開始時に候補が無かった場合は、以降は通常どおり候補を集めてから選ぶ
+            selectsImmediately = false
             return .unchanged
+        }
+        if selectsImmediately {
+            selectsImmediately = false
+            selectionWindowStart = nil
+            targetID = nearest.id
+            return .selected(nearest)
         }
         guard let windowStart = selectionWindowStart else {
             selectionWindowStart = now

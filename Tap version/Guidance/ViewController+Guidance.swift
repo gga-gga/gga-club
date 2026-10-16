@@ -84,7 +84,9 @@ extension ViewController {
 
     // MARK: - 状況確認（案内開始前）
 
-    func startSituationCheckIfNeeded() {
+    /// - Parameter announcesStart: 開始時に「計測をしています」と読み上げるか
+    ///   （床を確認できずにやり直すときは、やり直しの案内を先に読み上げているので読み上げない）
+    func startSituationCheckIfNeeded(announcesStart: Bool = true) {
         guard isGuidancePaused else { return }
         guard !isSituationCheckInProgress else { return }
 
@@ -92,29 +94,49 @@ extension ViewController {
             isSituationCheckInProgress = true
             situationTally.reset()
         }
-        let situationCheckAnnouncementDelay: TimeInterval = 1.0
-        DispatchQueue.main.asyncAfter(deadline: .now() + situationCheckAnnouncementDelay) { [weak self] in
-            self?.interruptAndSpeak(
-                text: "人数と空席数の計測をしています。",
-                rate: AVSpeechUtteranceDefaultSpeechRate * 1.1,
-                pitch: 0.9,
-                volume: 1.0
-            )
+        if announcesStart {
+            let situationCheckAnnouncementDelay: TimeInterval = 1.0
+            DispatchQueue.main.asyncAfter(deadline: .now() + situationCheckAnnouncementDelay) { [weak self] in
+                self?.interruptAndSpeak(
+                    text: "人数と空席数の計測をしています。",
+                    rate: AVSpeechUtteranceDefaultSpeechRate * 1.1,
+                    pitch: 0.9,
+                    volume: 1.0
+                )
+            }
         }
         situationCheckTimer?.invalidate()
         situationCheckTimer = Timer.scheduledTimer(withTimeInterval: situationCheckDuration, repeats: false) { [weak self] _ in
-            guard let self = self else { return }
-            let summary: String = self.stateQueue.sync {
-                self.isSituationCheckInProgress = false
-                return self.situationTally.summaryText()
-            }
-            self.interruptAndSpeak(
-                text: "\(summary)背面を3回タップして案内を開始してください。",
+            self?.finishSituationCheck()
+        }
+    }
+
+    /// 状況確認の終了：結果を読み上げる。床を一度も推定できていなければ、空席の有無を判断できない
+    /// （座面の推定に床の高さが必要なため、空席があっても0席になる）ので、「空席なし」とは言わずにやり直す
+    private func finishSituationCheck() {
+        let summary: String? = stateQueue.sync { () -> String? in
+            isSituationCheckInProgress = false
+            guard latestFloorY != nil else { return nil }
+            return situationTally.summaryText(seatCount: seatTracker.availableSeatCount)
+        }
+
+        guard let summary else {
+            interruptAndSpeak(
+                text: "周囲の床を確認できなかったため、空席を数えられませんでした。もう一度確認します。少し離れた床が見えるように、ゆっくり周囲を見回してください。",
                 rate: AVSpeechUtteranceDefaultSpeechRate * 1.1,
                 pitch: 0.9,
                 volume: 1.0
             )
+            startSituationCheckIfNeeded(announcesStart: false)
+            return
         }
+
+        interruptAndSpeak(
+            text: "\(summary)背面を3回タップして案内を開始してください。",
+            rate: AVSpeechUtteranceDefaultSpeechRate * 1.1,
+            pitch: 0.9,
+            volume: 1.0
+        )
     }
 
     func stopSituationCheck() {

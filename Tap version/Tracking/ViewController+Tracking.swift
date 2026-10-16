@@ -18,8 +18,11 @@ struct TrackingStepResult {
     /// 確定済みのトラック（3Dラベル・一覧表示用）
     var confirmedTracks: [Track] = []
     var shouldShowArrivalPanel = false
-    var currentEmptySeatCount = 0
+    /// 確定済みで空席と判定されている席の数（重複なし）
+    var availableSeatCount = 0
+    /// 直近の推論で1画面に映った人数と、状況確認中のその最大値
     var currentPersonCount = 0
+    var maxPersonCount = 0
 }
 
 extension ViewController {
@@ -28,7 +31,11 @@ extension ViewController {
             var result = TrackingStepResult()
 
             seatTracker.prune(now: now)
-            result.targetEvent = seatTracker.updateTarget(from: cameraPosition, now: now)
+            // 状況確認中は案内先を決めない（見回している途中で決めると、後から見つかった
+            // より近い席が選ばれない）。案内開始時に、見回して集まった候補から最も近い席を選ぶ
+            if !isGuidancePaused {
+                result.targetEvent = seatTracker.updateTarget(from: cameraPosition, now: now)
+            }
 
             // 到着判定は案内中の案内先だけ。一度到着したら同じ席では繰り返さない
             // （状況確認中に近くにいただけで「到着済み」にしてしまわないよう、案内中に限る）
@@ -42,8 +49,9 @@ extension ViewController {
 
             result.target = seatTracker.target
             result.confirmedTracks = seatTracker.confirmedTracks
-            result.currentEmptySeatCount = lastEmptySeatCount
+            result.availableSeatCount = seatTracker.availableSeatCount
             result.currentPersonCount = lastPersonCount
+            result.maxPersonCount = situationTally.maxPersonCount
             return result
         }
     }

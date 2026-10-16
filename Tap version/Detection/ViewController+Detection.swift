@@ -46,11 +46,7 @@ extension ViewController {
                                 frame: ARFrame) {
         if objects.isEmpty {
             stateQueue.sync {
-                self.lastEmptySeatCount = 0
                 self.lastPersonCount = 0
-                if self.isSituationCheckInProgress {
-                    self.situationTally.record(emptySeatCount: 0, personCount: 0)
-                }
             }
             DispatchQueue.main.async { [weak self] in
                 self?.debugTextView.text = ""
@@ -97,11 +93,9 @@ extension ViewController {
         let seatPositions = seatCandidates.compactMap { $0.placement?.worldPosition }
         let personRects = result.persons.map { $0.screenRect }
         stateQueue.sync {
-            self.lastEmptySeatCount = seatCandidates.count
             self.lastPersonCount = result.personCount
             if self.isSituationCheckInProgress {
-                self.situationTally.record(emptySeatCount: seatCandidates.count,
-                                           personCount: result.personCount)
+                self.situationTally.record(personCount: result.personCount)
             }
             self.seatTracker.integrate(seatPositions: seatPositions,
                                        personRects: personRects,
