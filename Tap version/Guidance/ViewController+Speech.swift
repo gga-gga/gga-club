@@ -3,7 +3,8 @@
 //  SUWARERU
 //
 //  何をいつ読み上げるか（空席の方向・距離、空席なし警告、到着、終了）。
-//  VoiceOver 実行中は TTS ではなく VoiceOver のアナウンスに回す。
+//  VoiceOver が有効でも、すべてアプリ自身の音声合成（SpeechOutput）で話す。
+//  （VoiceOver のアナウンスに回すと、VoiceOver 自身の読み上げに途中で切られるため）
 //
 
 import AVFoundation
@@ -16,10 +17,6 @@ extension ViewController {
                            rate: Float = AVSpeechUtteranceDefaultSpeechRate * 1.0,
                            pitch: Float = 1.0,
                            volume: Float = 1.0) {
-        if isVoiceOverRunning() {
-            announceForAccessibility(text)
-            return
-        }
         // しゃべっていたら即停止（キューも含めて破棄）
         speechOutput.stop()
         // クールダウン管理をしているなら、ここでリセットしておく
@@ -53,12 +50,6 @@ extension ViewController {
         lastSpokenAt[guidance.trackID] = now
 
         let sentence = guidanceSentence(for: guidance)
-
-        if isVoiceOverRunning() {
-            announceForAccessibility(sentence)
-            return
-        }
-
         let utt = speechOutput.makeUtterance(sentence,
                                              rate: AVSpeechUtteranceDefaultSpeechRate * 1.1,
                                              pitch: 0.9,
@@ -112,10 +103,6 @@ extension ViewController {
     func speakNoSeatWarning() {
         // パネル中はしゃべらない
         if isAwaitingArrivalDecision || isGuidancePaused { return }
-        if isVoiceOverRunning() {
-            announceForAccessibility("空席が消失しました。カメラで左右を写して空席を探してください。")
-            return
-        }
         interruptAndSpeak(
             text: "空席が消失しました。カメラで左右を写して空席を探してください。",
             rate: AVSpeechUtteranceDefaultSpeechRate * 1.1,
@@ -133,10 +120,6 @@ extension ViewController {
             volume: 1.0
         )
         DispatchQueue.main.async { [weak self] in
-            if self?.isVoiceOverRunning() == true {
-                self?.announceForAccessibility(utt.speechString)
-                return
-            }
             self?.speechOutput.speakWithSFX(utt)
         }
     }
@@ -158,12 +141,7 @@ extension ViewController {
             self.lastSpokenAt.removeAll()
 
             // 終了アナウンスを新しく再生
-            if self.isVoiceOverRunning() {
-                self.announceForAccessibility(utt.speechString)
-            } else {
-                self.speechOutput.speak(utt)
-                self.announceForAccessibility(text)
-            }
+            self.speechOutput.speak(utt)
 
             // 少し待ってから自動終了（テキストの長さに合わせて調整）
             let delay: TimeInterval = 4.0

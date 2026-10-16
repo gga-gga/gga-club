@@ -165,6 +165,10 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
 
         sceneView.session.run(config)
 
+        // ポーチに入れて画面に触れない使い方なので、自動ロックで画面が消えないようにする
+        // （画面が消えるとアプリが止まり、ARKit も止まって案内が途切れる）
+        UIApplication.shared.isIdleTimerDisabled = true
+
         // 空席監視の状態リセット
         noSeatMonitor.reset()
 
@@ -188,6 +192,9 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
 
         // 画面を離れるときは読み上げも止める
         stopAllTTS()
+
+        // 自動ロックを元に戻す
+        UIApplication.shared.isIdleTimerDisabled = false
     }
 
     override func viewDidDisappear(_ animated: Bool) {
@@ -398,7 +405,8 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
             self.arrivalPanelView.isHidden = false
             self.updateAccessibilityForCurrentState()
             self.arrivalFeedback.notificationOccurred(.success)
-            UIAccessibilityPostNotification(UIAccessibilityScreenChangedNotification, self.arrivalPanelView)
+            // VoiceOver への画面切り替えの通知は出さない（VoiceOver がパネルを読み上げ、
+            // 下の到着の案内と声が重なるため）
 
             let situationCheckAnnouncementDelay: TimeInterval = 1.5
             DispatchQueue.main.asyncAfter(deadline: .now() + situationCheckAnnouncementDelay) { [weak self] in
