@@ -97,12 +97,8 @@ extension ViewController {
         if announcesStart {
             let situationCheckAnnouncementDelay: TimeInterval = 1.0
             DispatchQueue.main.asyncAfter(deadline: .now() + situationCheckAnnouncementDelay) { [weak self] in
-                self?.interruptAndSpeak(
-                    text: "人数と空席数の計測をしています。",
-                    rate: AVSpeechUtteranceDefaultSpeechRate * 1.1,
-                    pitch: 0.9,
-                    volume: 1.0
-                )
+                // ポーチに入れて使うので、スマホではなく体ごと向きを変えてもらう
+                self?.interruptAndSpeak(text: "周囲の空席と混み具合を確認します。体ごと、ゆっくり左右に向きを変えてください。")
             }
         }
         // 位置推定が正常だった時間だけを数え、situationCheckDuration に達したら終える
@@ -159,14 +155,11 @@ extension ViewController {
     /// 状況確認の終了：結果を読み上げる。床を一度も推定できていなければ、空席の有無を判断できない
     /// （座面の推定に床の高さが必要なため、空席があっても0席になる）ので、「空席なし」とは言わずにやり直す
     private func finishSituationCheck() {
-        let result: (summary: String, seatCount: Int)? = stateQueue.sync { () -> (summary: String, seatCount: Int)? in
+        stateQueue.sync {
             isSituationCheckInProgress = false
-            guard latestFloorY != nil else { return nil }
-            let seatCount = seatTracker.availableSeatCount
-            return (situationTally.summaryText(seatCount: seatCount), seatCount)
         }
 
-        guard let result = result else {
+        guard let result = makeSituationResult() else {
             interruptAndSpeak(
                 text: "周囲の床を確認できなかったため、空席を数えられませんでした。もう一度確認します。少し離れた床が見えるように、ゆっくり周囲を見回してください。",
                 rate: AVSpeechUtteranceDefaultSpeechRate * 1.1,
@@ -177,12 +170,42 @@ extension ViewController {
             return
         }
 
-        // 背面タップ：3回＝誘導を開始、2回＝もう一度確認（ViewController+BackTap）。
-        // 空席が無いときは誘導を始められないので、やり直し方だけを伝える
+        speakSituationResult(result)
+    }
+
+    /// 状況確認の結果を、今の空席と今向いている方向から作る。床を一度も推定できていなければ nil
+    /// （座面の推定に床の高さが必要なため、空席があっても0席になってしまう）
+    func makeSituationResult() -> (text: String, seatCount: Int)? {
+        let data = stateQueue.sync { () -> (floorKnown: Bool, seats: [simd_float3], crowd: CrowdLevel) in
+            (latestFloorY != nil, seatTracker.availableSeats.map { $0.worldPosition }, situationTally.crowdLevel)
+        }
+        guard data.floorKnown else { return nil }
+
+        var bearings: [SeatBearing] = []
+        if let cameraTransform = sceneView.session.currentFrame?.camera.transform {
+            let camera = cameraTransform.columns.3
+            bearings = data.seats.map { seat in
+                SeatBearing(yawDeg: GuidanceMath.yawAngleDeg(to: seat, cameraTransform: cameraTransform),
+                            distance: simd_length(simd_float2(seat.x - camera.x, seat.z - camera.z)))
+            }
+        }
+        let text = SituationSummary.text(seatCount: data.seats.count, bearings: bearings, crowd: data.crowd)
+        return (text, data.seats.count)
+    }
+
+    /// 結果と、次に何ができるかを読み上げる（背面タップ：ViewController+BackTap）。
+    /// 空席が無いときは誘導を始められないので、やり直し方だけを伝える
+    func speakSituationResult(_ result: (text: String, seatCount: Int)) {
         let prompt = result.seatCount > 0
-            ? "誘導を開始するには背面を3回、もう一度確認するには2回タップしてください。"
+            ? "誘導を開始するには背面を3回、結果をもう一度聞くには2回タップしてください。"
             : "もう一度確認するには、背面を2回タップしてください。"
-        interruptAndSpeak(text: result.summary + prompt)
+        interruptAndSpeak(text: result.text + prompt)
+    }
+
+    /// 背面タップ2回：結果をもう一度聞く。方向は今向いている方向を基準に作り直す
+    func repeatSituationResult() {
+        guard let result = makeSituationResult() else { return }
+        speakSituationResult(result)
     }
 
     /// 誘導を止めて、状況確認からやり直す（誘導中に空席が見つからない状態が続いたとき）

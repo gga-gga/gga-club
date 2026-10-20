@@ -8,7 +8,7 @@
 //  | 状態                   | 2回（もう一度・いいえ）       | 3回（決定・はい）                        |
 //  |------------------------|------------------------------|------------------------------------------|
 //  | 状況確認の計測中        | 「計測中です」と伝える          | 何もしない                                |
-//  | 状況確認の結果を聞いた後 | もう一度確認する               | 誘導を開始（空席が無ければ開始しない）       |
+//  | 状況確認の結果を聞いた後 | 結果をもう一度聞く（空席0なら確認し直す） | 誘導を開始（空席が無ければ開始しない） |
 //  | 誘導中                 | 今の方向と距離をすぐ読み上げる   | 中断の確認 → 10秒以内にもう一度3回で中断    |
 //  | 到着時                 | 案内を続ける                  | 終了する                                  |
 //
@@ -69,7 +69,13 @@ extension ViewController: ShortcutActionHandling {
                 interruptAndSpeak(text: "空席がないため、誘導を開始できません。もう一度確認するには、背面を2回タップしてください。")
             }
         case .secondary:
-            startSituationCheckIfNeeded()
+            // 空席があれば結果を聞き直す。空席が無ければ、先に進めるよう計測し直す
+            let seatCount = stateQueue.sync { seatTracker.availableSeatCount }
+            if seatCount > 0 {
+                repeatSituationResult()
+            } else {
+                startSituationCheckIfNeeded()
+            }
         }
     }
 

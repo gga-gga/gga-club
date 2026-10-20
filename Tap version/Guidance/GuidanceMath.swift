@@ -61,4 +61,10 @@ enum GuidanceMath {
         if m < 3.0 { return String(format: "残り%.1fメートル", m) }      // 2.3m → 2.3メートル
         return String(format: "残り%.0fメートル", round(m))               // 5.2m → 5メートル
     }
+
+    /// 距離の読み上げ用丸め（「残り」を付けない形。状況確認の結果で使う）
+    static func approxDistancePhrase(fromMeters m: Float) -> String {
+        if m < 3.0 { return String(format: "約%.1fメートル", m) }
+        return String(format: "約%.0fメートル", round(m))
+    }
 }

@@ -138,7 +138,9 @@ final class SeatTracker {
     /// 案内できる空席（確定済み・空席判定）が1つでもあるか
     var hasAvailableSeat: Bool { tracks.values.contains { $0.isConfirmed && $0.isEmpty } }
     /// 案内できる空席（確定済み・空席判定）の数。同じ席は3Dの位置で1つにまとまっているので重複しない
-    var availableSeatCount: Int { tracks.values.filter { $0.isConfirmed && $0.isEmpty }.count }
+    var availableSeatCount: Int { availableSeats.count }
+    /// 案内できる空席（確定済み・空席判定）
+    var availableSeats: [Track] { tracks.values.filter { $0.isConfirmed && $0.isEmpty } }
 
     /// 次に案内先を選ぶとき、候補を集める待ち時間を省いて、その時点の最も近い空席をすぐ選ぶ。
     /// 状況確認で周囲を見回した後の案内開始時に使う（見回している間が候補を集める時間にあたるため）

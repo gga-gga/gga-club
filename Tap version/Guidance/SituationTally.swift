@@ -56,10 +56,50 @@ struct SituationTally {
         maxPersonCount = max(maxPersonCount, personCount)
     }
 
-    /// 状況確認の結果の読み上げ文
-    /// - Parameter seatCount: 確定済みで空席と判定されている席の数
-    func summaryText(seatCount: Int) -> String {
-        let seats = seatCount == 0 ? "空席はありません。" : "空席は\(seatCount)席あります。"
-        return seats + CrowdLevel(maxPersonCount: maxPersonCount).phrase
+    var crowdLevel: CrowdLevel { CrowdLevel(maxPersonCount: maxPersonCount) }
+}
+
+/// 空席1つ分の、今向いている方向から見た水平角度（右が +）と水平距離
+struct SeatBearing {
+    let yawDeg: Float
+    let distance: Float
+}
+
+/// 状況確認の結果の読み上げ文
+///  例：「近くの空席は3席あります。右側に2席、左側に1席。一番近いのは2時方向、約1.8メートルです。周囲はやや混んでいます。」
+///  - 数えられるのは LiDAR の届く範囲（約3.5m）だけなので、車両全体と誤解されないよう「近くの」と言う
+///  - 左右・方向は、結果を読み上げる時点で向いている方向が基準
+enum SituationSummary {
+    /// 正面とみなす角度の幅（±）[deg]
+    static let frontHalfAngleDegrees: Float = 15
+
+    /// - Parameters:
+    ///   - seatCount: 空席の数
+    ///   - bearings: 空席ごとの方向と距離（カメラの姿勢が取れないときは空。その場合は方向を言わない）
+    static func text(seatCount: Int, bearings: [SeatBearing], crowd: CrowdLevel) -> String {
+        guard seatCount > 0 else { return "近くに空席はありません。" + crowd.phrase }
+
+        var text = "近くの空席は\(seatCount)席あります。"
+        if seatCount >= 2, !bearings.isEmpty {
+            text += sidesPhrase(bearings)
+        }
+        if let nearest = bearings.min(by: { $0.distance < $1.distance }) {
+            let direction = GuidanceMath.directionPhrase(fromYawDeg: nearest.yawDeg) ?? ""
+            let distance = GuidanceMath.approxDistancePhrase(fromMeters: nearest.distance)
+            text += seatCount == 1 ? "\(direction)、\(distance)です。" : "一番近いのは\(direction)、\(distance)です。"
+        }
+        return text + crowd.phrase
+    }
+
+    /// 「右側に2席、左側に1席。」（0席の側は言わない）
+    private static func sidesPhrase(_ bearings: [SeatBearing]) -> String {
+        let right = bearings.filter { $0.yawDeg > frontHalfAngleDegrees }.count
+        let left = bearings.filter { $0.yawDeg < -frontHalfAngleDegrees }.count
+        let front = bearings.count - right - left
+        var items: [String] = []
+        if right > 0 { items.append("右側に\(right)席") }
+        if left > 0 { items.append("左側に\(left)席") }
+        if front > 0 { items.append("正面に\(front)席") }
+        return items.joined(separator: "、") + "。"
     }
 }
