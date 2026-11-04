@@ -21,13 +21,17 @@ final class StartViewController: UIViewController, ShortcutActionHandling {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        // 画面全体を1つの要素にして、VoiceOver では使い方の説明だけを読ませる
+        // 画面全体を1つの要素にする。説明文は空にして、画面が開いたときに VoiceOver に何も読ませない
+        // （以前は使い方の説明を読ませていた。使い方は背面タップ2回でアプリが話す）。
+        // 要素自体は残しておくので、マジックタップ・エスケープはこれまでどおり受け付ける
         view.isAccessibilityElement = true
-        view.accessibilityLabel = "空席ナビ。背面を3回タップすると、周囲の空席と混み具合の確認を始めます。使い方を聞くには、背面を2回タップしてください。"
+        view.accessibilityLabel = ""
     }
 
     override func viewDidAppear(_ animated: Bool) {
         super.viewDidAppear(animated)
+        // フォーカスをこの画面に移しておく（説明文が空なので何も読まれない）。
+        // 誘導画面から戻ったときにフォーカスが行方不明になると、エスケープが効かないため
         UIAccessibilityPostNotification(UIAccessibilityScreenChangedNotification, view)
         ShortcutActionCenter.shared.setHandler(self)
     }
