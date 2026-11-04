@@ -1,0 +1,180 @@
+//
+//  ViewController+Detection.swift
+//  SUWARERU
+//
+//  推論ループ（mlInterval ごとに SeatDetector を呼ぶ）と、結果を画面状態へ反映する処理。
+//
+
+import ARKit
+import UIKit
+import Vision
+
+extension ViewController {
+    // MARK: - Vision Loop
+    func startCoreMLLoopIfNeeded() {
+        guard !isMLLoopRunning else { return }
+        isMLLoopRunning = true
+        scheduleNextCoreMLUpdate()
+    }
+
+    func scheduleNextCoreMLUpdate() {
+        dispatchQueueML.asyncAfter(deadline: .now() + mlInterval) { [weak self] in
+            guard let self = self, self.isMLLoopRunning else { return }
+            self.updateCoreML()
+            self.scheduleNextCoreMLUpdate()
+        }
+    }
+
+    func updateCoreML() {
+        let now = CACurrentMediaTime()
+        if now - lastMLTime < mlInterval {
+            return
+        }
+        lastMLTime = now
+
+        // 推論・BBoxの画面変換・3D位置の推定は、すべてこの1枚のフレームで行う
+        // （以前は3D位置だけ最大0.4秒後の別フレームの深度から求めていた）
+        guard let frame = sceneView.session.currentFrame else { return }
+        let orientation = cgImageOrientationForDevice()
+        guard let observations = seatDetector.detect(in: frame.capturedImage, orientation: orientation) else { return }
+        handleDetectionResults(observations, orientation: orientation, frame: frame)
+    }
+
+    // MARK: - Detection results
+    func handleDetectionResults(_ objects: [VNRecognizedObjectObservation],
+                                orientation: CGImagePropertyOrientation,
+                                frame: ARFrame) {
+        if objects.isEmpty {
+            stateQueue.sync {
+                self.lastPersonCount = 0
+            }
+            DispatchQueue.main.async { [weak self] in
+                self?.debugTextView.text = ""
+                self?.bboxOverlay.show([])
+            }
+            return
+        }
+        // viewSize が 0 の場合はメインスレッドで拾ってから続行
+        if viewSize.width <= 0 || viewSize.height <= 0 {
+            DispatchQueue.main.async {
+                self.viewSize = self.sceneView.bounds.size
+            }
+            return
+        }
+
+        let now = CACurrentMediaTime()
+        let viewportSize = viewSize
+        let orientationForDisplay = displayOrientation
+        let displayTransform = frame.displayTransform(for: orientationForDisplay, viewportSize: viewportSize)
+        let result = seatDetector.classify(objects,
+                                           orientation: orientation,
+                                           displayTransform: displayTransform,
+                                           viewSize: viewportSize,
+                                           timestamp: now)
+        // 空席候補だけ、同じフレームの深度から座面の3D位置を求めておく。
+        // そのフレームで ARKit の位置推定が正常でなければ、位置がずれているので推定しない
+        let isTrackingNormal = ARTrackingQuality(frame.camera.trackingState).isNormal
+        let floorY = stateQueue.sync { self.latestFloorY }
+        let emptyChairs = result.emptyChairs.map { chair -> Detection in
+            var chair = chair
+            guard isTrackingNormal else {
+                chair.localization = .failed(.trackingLimited)
+                return chair
+            }
+            chair.localization = WorldPositionEstimator.estimatePlacement(for: chair,
+                                                                          persons: result.persons,
+                                                                          floorY: floorY,
+                                                                          frame: frame,
+                                                                          interfaceOrientation: orientationForDisplay,
+                                                                          viewportSize: viewportSize)
+            return chair
+        }
+
+        // 空席候補は「座面を確認できた椅子」だけ。人と重なっていなくても、座面が見えない
+        // （荷物が置かれている・遠すぎる・床が未推定など）椅子は空席として数えない
+        let seatCandidates = emptyChairs.filter { $0.placement != nil }
+
+        // 座席トラックへの取り込みも同じフレームで行う（座面に人が重なったかの判定に、
+        // このフレームの person の BBox が必要なため）。空席が無くても person の観測は取り込む
+        let seatPositions = seatCandidates.compactMap { $0.placement?.worldPosition }
+        let personRects = result.persons.map { $0.screenRect }
+        stateQueue.sync {
+            self.lastPersonCount = result.personCount
+            if self.isSituationCheckInProgress {
+                self.situationTally.record(personCount: result.personCount)
+            }
+            // 位置推定が不安定な間は、座席の追跡にも取り込まない
+            // （人が重なったかの判定も、ずれた位置で座席を画面に投影することになるため）
+            guard isTrackingNormal else { return }
+            self.seatTracker.integrate(seatPositions: seatPositions,
+                                       personRects: personRects,
+                                       label: "chair",
+                                       frame: frame,
+                                       interfaceOrientation: orientationForDisplay,
+                                       viewportSize: viewportSize,
+                                       now: now)
+        }
+
+        guard !emptyChairs.isEmpty else {
+            // 検出が無いときはBBOXを全部消す
+            DispatchQueue.main.async { [weak self] in
+                self?.debugTextView.text = ""
+                self?.bboxOverlay.show([])
+            }
+            return
+        }
+
+        // デバッグ表示：信頼度、座面の点の数・広がり・水平距離、または推定できなかった理由
+        let lines = emptyChairs.prefix(2).map { det -> String in
+            let head = "\(det.label) - \(Int(det.confidence * 100))%"
+            switch det.localization {
+            case .located(let placement)?:
+                let spread = String(format: "幅%.2f 奥%.2f", placement.lateralExtent, placement.depthExtent)
+                let distance = String(format: "%.2f", placement.horizontalDistance)
+                return "\(head) | 座面\(placement.surfacePointCount)点 \(spread) | \(distance)m"
+            case .failed(let failure)?:
+                return "\(head) | ✕\(failure.debugText)"
+            case nil:
+                return head
+            }
+        }.joined(separator: "\n")
+        // 緑の小さい点＝座面と判定した点（間引き済み）、赤の輪＝推定した座面の中心
+        // （正しければ緑は座面の上だけに乗り、赤はその中央に来る）
+        let markers = emptyChairs.compactMap { $0.placement }.flatMap { placement -> [BoundingBoxOverlayView.Marker] in
+            placement.surfaceScreenPoints.map {
+                BoundingBoxOverlayView.Marker(point: $0, color: .systemGreen, radius: 2)
+            } + [BoundingBoxOverlayView.Marker(point: placement.centerScreenPoint, color: .systemRed, radius: 8)]
+        }
+        // 黄色の枠＝空席候補（座面を確認できた）、灰色の枠＝人とは重なっていないが座面を確認できない
+        let candidateRects = seatCandidates.map { $0.screenRect }
+        let unconfirmedRects = emptyChairs.filter { $0.placement == nil }.map { $0.screenRect }
+        DispatchQueue.main.async {
+            self.debugTextView.text = lines
+            // このフレームで検出した BBOX を画面に反映
+            self.bboxOverlay.show(candidateRects, dimmedRects: unconfirmedRects, markers: markers)
+        }
+    }
+
+    /// 推論に渡す画像の向き（推論スレッドから呼ぶ）。
+    /// 端末の向きが分からない（画面を上・下に向けている等）ときは、メインスレッドで保存しておいた
+    /// 画面の向き（displayOrientation）を使う。以前はここで UIApplication / UIWindowScene を
+    /// 推論スレッドから触っていた（メインスレッド専用のAPIのため実行時に警告が出ていた）。
+    func cgImageOrientationForDevice() -> CGImagePropertyOrientation {
+        switch UIDevice.current.orientation {
+        case .portrait: return .right
+        case .portraitUpsideDown: return .left
+        case .landscapeLeft: return .up      // 端末の左側が上＝ホームボタン（下端）が右
+        case .landscapeRight: return .down
+        default:
+            // 画面（インターフェース）の向きは、端末の向きと横向きの左右の呼び方が逆になる。
+            // 以前はここを端末の向きと同じ対応にしていたため、横向きのときに上下が逆になっていた
+            switch displayOrientation {
+            case .portrait: return .right
+            case .portraitUpsideDown: return .left
+            case .landscapeRight: return .up
+            case .landscapeLeft: return .down
+            default: return .right
+            }
+        }
+    }
+}
