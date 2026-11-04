@@ -18,14 +18,22 @@ extension ViewController {
     /// 以前は前の発話を「始めてから」3秒だったため、案内文（3秒以上かかる）がほぼ途切れず続いていた
     static let guidanceIntervalAfterSpeech: TimeInterval = 1.5
 
-    /// いま話している内容やキューを全部止めて、効果音のあとに新しいテキストを読み上げる
+    /// いま話している内容やキューを全部止めて、新しいテキストを読み上げる
+    /// - Parameter soundEffect: 話す前に効果音を鳴らすか。背面タップへの応答では false にする
+    ///   （VoiceOver がオンだと、タップしたときに VoiceOver 自身の音が鳴るので、二重になって聞きづらい）。
+    ///   タップなしで流れる案内（計測の結果、席が埋まった、到着など）では、注意を引くために鳴らす
     func interruptAndSpeak(text: String,
                            rate: Float = AVSpeechUtteranceDefaultSpeechRate * 1.1,
                            pitch: Float = 0.9,
-                           volume: Float = 1.0) {
+                           volume: Float = 1.0,
+                           soundEffect: Bool = true) {
         speechOutput.stop()
         let utt = speechOutput.makeUtterance(text, rate: rate, pitch: pitch, volume: volume)
-        speechOutput.speakWithSFX(utt)
+        if soundEffect {
+            speechOutput.speakWithSFX(utt)
+        } else {
+            speechOutput.speak(utt)
+        }
     }
 
     /// 案内先の方向と距離を読み上げる。何か話している間と、前の発話が終わってから
@@ -67,9 +75,10 @@ extension ViewController {
         return "\(head)、\(direction)、\(distance)"
     }
 
-    /// 誘導開始の案内。言い終わってから方向の案内が始まる（speak(guidance:) が待つ）
+    /// 誘導開始の案内（背面タップへの応答なので効果音なし）。言い終わってから方向の案内が始まる
     func speakGuidanceStart() {
-        interruptAndSpeak(text: "空席への誘導を開始します。方向をもう一度聞くには背面を2回、中断するには3回タップしてください。")
+        interruptAndSpeak(text: "空席への誘導を開始します。方向をもう一度聞くには背面を2回、中断するには3回タップしてください。",
+                          soundEffect: false)
     }
 
     /// 案内先を失った・切り替えたことを、理由と合わせて伝える
@@ -113,8 +122,9 @@ extension ViewController {
         interruptAndSpeak(text: "空席に到着しました。ナビを終了するには背面を3回、案内を続けるには背面を2回タップしてください。")
     }
 
+    /// 到着時の終了（背面タップへの応答なので効果音なし）
     func speakFinishGreeting() {
-        interruptAndSpeak(text: "お疲れ様でした。")
+        interruptAndSpeak(text: "お疲れ様でした。", soundEffect: false)
     }
 
     func stopAllTTS() {

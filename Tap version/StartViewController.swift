@@ -50,7 +50,8 @@ final class StartViewController: UIViewController, ShortcutActionHandling {
             let utterance = speechOutput.makeUtterance(
                 "空席ナビです。背面を3回タップすると、周囲の空席と混み具合の確認を始めます。"
             )
-            speechOutput.speakWithSFX(utterance)
+            // 背面タップへの応答なので効果音は鳴らさない（VoiceOver のタップ音と二重になるため）
+            speechOutput.speak(utterance)
         }
     }
 

@@ -12,6 +12,9 @@
 //  | 誘導中                 | 今の方向と距離をすぐ読み上げる   | 中断の確認 → 10秒以内にもう一度3回で中断    |
 //  | 到着時                 | 案内を続ける                  | 終了する                                  |
 //
+//  背面タップへの応答の読み上げには効果音を付けない（VoiceOver がオンだとタップ時に VoiceOver の音が
+//  鳴るので、二重になって聞きづらいため）。
+//
 //  背面タップを設定していない端末のための予備として、VoiceOver のジェスチャも同じ扱いにする。
 //   - マジックタップ（2本指でダブルタップ）＝3回タップ
 //   - エスケープ（2本指でZを描く）＝2回タップ
@@ -33,7 +36,7 @@ extension ViewController: ShortcutActionHandling {
                 finishAtArrival()
             case .secondary:
                 continueAfterArrival()
-                interruptAndSpeak(text: "案内を続けます。")
+                interruptAndSpeak(text: "案内を続けます。", soundEffect: false)
             }
             return
         }
@@ -54,7 +57,7 @@ extension ViewController: ShortcutActionHandling {
         let isMeasuring = stateQueue.sync { isSituationCheckInProgress }
         if isMeasuring {
             if action == .secondary {
-                interruptAndSpeak(text: "周囲を計測中です。終わるまでお待ちください。")
+                interruptAndSpeak(text: "周囲を計測中です。終わるまでお待ちください。", soundEffect: false)
             }
             return
         }
@@ -66,7 +69,8 @@ extension ViewController: ShortcutActionHandling {
             if seatCount > 0 {
                 startGuidance()
             } else {
-                interruptAndSpeak(text: "空席がないため、誘導を開始できません。もう一度確認するには、背面を2回タップしてください。")
+                interruptAndSpeak(text: "空席がないため、誘導を開始できません。もう一度確認するには、背面を2回タップしてください。",
+                                  soundEffect: false)
             }
         case .secondary:
             // 空席があれば結果を聞き直す。空席が無ければ、先に進めるよう計測し直す
@@ -88,14 +92,15 @@ extension ViewController: ShortcutActionHandling {
             return
         }
         abortConfirmationDeadline = now + Self.abortConfirmationWindow
-        interruptAndSpeak(text: "中断しますか？中断するには、10秒以内にもう一度、背面を3回タップしてください。")
+        interruptAndSpeak(text: "中断しますか？中断するには、10秒以内にもう一度、背面を3回タップしてください。",
+                          soundEffect: false)
     }
 
     private func abortNavigation() {
         // 以降の案内・振動を止める
         isFinishingNavigation = true
         directionHaptics.stop()
-        interruptAndSpeak(text: "空席ナビを中断します。")
+        interruptAndSpeak(text: "空席ナビを中断します。", soundEffect: false)
 
         // 言い終わるのを待ってから開始画面へ戻る
         let delay: TimeInterval = 2.5

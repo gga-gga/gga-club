@@ -101,10 +101,17 @@ extension ViewController {
             isSituationCheckInProgress = true
             situationTally.reset()
         }
+        // 開始の案内を言い終わるまでは、計測時間を数えない（言い終わる前に結果が割り込んで、
+        // 案内が途中で切れていたため）。案内なしで始めるときは、すぐに数え始める
+        situationCheckAwaitsInstruction = announcesStart
+        situationCheckInstructionSpoken = false
         if announcesStart {
             DispatchQueue.main.asyncAfter(deadline: .now() + announcementDelay) { [weak self] in
-                // ポーチに入れて使うので、スマホではなく体ごと向きを変えてもらう
-                self?.interruptAndSpeak(text: "周囲の空席と混み具合を確認します。体ごと、ゆっくり左右に向きを変えてください。")
+                // ポーチに入れて使うので、スマホではなく体ごと向きを変えてもらう。
+                // 開始画面や結果の後の背面タップへの応答なので、効果音は鳴らさない
+                self?.interruptAndSpeak(text: "周囲の空席と混み具合を確認します。体ごと、ゆっくり左右に向きを変えてください。",
+                                        soundEffect: false)
+                self?.situationCheckInstructionSpoken = true
             }
         }
         // 位置推定が正常だった時間だけを数え、situationCheckDuration に達したら終える
@@ -119,11 +126,23 @@ extension ViewController {
     static let situationCheckTickInterval: TimeInterval = 0.25
 
     private func tickSituationCheck() {
+        let timedOut = CACurrentMediaTime() - situationCheckStartedAt >= situationCheckMaxDuration
+
+        // 開始の案内を言い終わってから数え始める
+        if situationCheckAwaitsInstruction {
+            if situationCheckInstructionSpoken && !speechOutput.isBusy {
+                situationCheckAwaitsInstruction = false
+            } else if !timedOut {
+                return
+            }
+        }
+
+        // 位置推定が正常で、かつ何も話していない時間だけを数える。
+        // 話している途中で計測が終わると、結果の読み上げがその発話を途中で切ってしまうため
         let isNormal = stateQueue.sync { trackingQuality.isNormal }
-        if isNormal {
+        if isNormal && !speechOutput.isBusy {
             situationCheckStableElapsed += Self.situationCheckTickInterval
         }
-        let timedOut = CACurrentMediaTime() - situationCheckStartedAt >= situationCheckMaxDuration
         guard situationCheckStableElapsed >= situationCheckDuration || timedOut else { return }
 
         situationCheckTimer?.invalidate()
@@ -176,7 +195,7 @@ extension ViewController {
             return
         }
 
-        speakSituationResult(result)
+        speakSituationResult(result, soundEffect: true)
     }
 
     /// 状況確認の結果を、今の空席と今向いている方向から作る。床を一度も推定できていなければ nil
@@ -201,17 +220,18 @@ extension ViewController {
 
     /// 結果と、次に何ができるかを読み上げる（背面タップ：ViewController+BackTap）。
     /// 空席が無いときは誘導を始められないので、やり直し方だけを伝える
-    func speakSituationResult(_ result: (text: String, seatCount: Int)) {
+    /// - Parameter soundEffect: 計測の終了で自動で流れるときは true、背面タップで聞き直すときは false
+    func speakSituationResult(_ result: (text: String, seatCount: Int), soundEffect: Bool) {
         let prompt = result.seatCount > 0
             ? "誘導を開始するには背面を3回、結果をもう一度聞くには2回タップしてください。"
             : "もう一度確認するには、背面を2回タップしてください。"
-        interruptAndSpeak(text: result.text + prompt)
+        interruptAndSpeak(text: result.text + prompt, soundEffect: soundEffect)
     }
 
     /// 背面タップ2回：結果をもう一度聞く。方向は今向いている方向を基準に作り直す
     func repeatSituationResult() {
         guard let result = makeSituationResult() else { return }
-        speakSituationResult(result)
+        speakSituationResult(result, soundEffect: false)
     }
 
     /// 誘導を止めて、状況確認からやり直す（誘導中に空席が見つからない状態が続いたとき）

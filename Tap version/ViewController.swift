@@ -91,6 +91,10 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
     let situationCheckMaxDuration: TimeInterval = 30.0
     var situationCheckStartedAt: TimeInterval = 0
     var situationCheckStableElapsed: TimeInterval = 0
+    /// 開始の案内を言い終わるのを待っている間 true（その間は計測時間を数えない）
+    var situationCheckAwaitsInstruction = false
+    /// 開始の案内を話し始めたら true
+    var situationCheckInstructionSpoken = false
 
     // ======= ARKit の位置推定の状態 =======
     /// 最新の状態（描画スレッドで更新し、推論スレッド・メインスレッドから読むので stateQueue で保護する）
