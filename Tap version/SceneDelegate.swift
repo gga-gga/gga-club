@@ -28,6 +28,17 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         handleShortcutURLs(URLContexts)
     }
 
+    // 背面タップでショートカットが動くと、一瞬ほかのアプリ（ショートカット）が前に出て、
+    // このアプリに戻ってくることがある。そのとき VoiceOver がアプリ名を読み上げるので、
+    // 戻ってきたことを ShortcutActionCenter に知らせ、応答の読み上げと重ならないようにする
+    func sceneWillResignActive(_ scene: UIScene) {
+        ShortcutActionCenter.shared.noteSceneResignedActive()
+    }
+
+    func sceneDidBecomeActive(_ scene: UIScene) {
+        ShortcutActionCenter.shared.noteSceneBecameActive()
+    }
+
     /// 受け取った URL を背面タップの操作として、今表示している画面に渡す
     /// （表示中の画面がまだ無ければ ShortcutActionCenter が少しの間保持する）
     private func handleShortcutURLs(_ contexts: Set<UIOpenURLContext>) {
