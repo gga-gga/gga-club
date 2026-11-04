@@ -22,18 +22,9 @@ extension ViewController {
         // 画面に入ったときや、画面に触れたときに読まれるのはこの短い説明だけになる
         sceneView.isAccessibilityElement = true
         view.accessibilityElements = [sceneView as Any]
-        updateAccessibilityForCurrentState()
-    }
-
-    /// 状態に合わせて画面の説明を変える。読み上げのきっかけ（通知）は出さないので、
-    /// 利用者が画面に触れたときにだけ読まれる
-    func updateAccessibilityForCurrentState() {
-        if isAwaitingArrivalDecision {
-            sceneView.accessibilityLabel = "空席ナビ、到着しました。操作は背面タップで行います。"
-        } else if isGuidancePaused {
-            sceneView.accessibilityLabel = "空席ナビ、状況確認中。操作は背面タップで行います。"
-        } else {
-            sceneView.accessibilityLabel = "空席ナビ、誘導中。操作は背面タップで行います。"
-        }
+        // 説明文は固定にして、状態が変わっても書き換えない。
+        // フォーカスのある要素の説明文を書き換えると、VoiceOver がそれを自動で読み直し、
+        // 誘導開始や到着のときのアプリの読み上げと重なっていたため
+        sceneView.accessibilityLabel = "空席ナビ。操作は背面タップで行います。"
     }
 }

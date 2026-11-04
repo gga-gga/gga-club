@@ -86,7 +86,14 @@ extension ViewController {
 
     /// - Parameter announcesStart: 開始時に「計測をしています」と読み上げるか
     ///   （床を確認できずにやり直すときは、やり直しの案内を先に読み上げているので読み上げない）
-    func startSituationCheckIfNeeded(announcesStart: Bool = true) {
+    /// 画面が開いた直後の最初の読み上げまでの秒数（VoiceOver がオフのとき）
+    static let firstAnnouncementDelay: TimeInterval = 1.0
+    /// 同上（VoiceOver がオンのとき）。VoiceOver が画面の説明を読み終えるのを待つ
+    static let firstAnnouncementDelayWithVoiceOver: TimeInterval = 3.0
+
+    /// - Parameter announcementDelay: 開始の読み上げまでの秒数
+    func startSituationCheckIfNeeded(announcesStart: Bool = true,
+                                     announcementDelay: TimeInterval = ViewController.firstAnnouncementDelay) {
         guard isGuidancePaused else { return }
         guard !isSituationCheckInProgress else { return }
 
@@ -95,8 +102,7 @@ extension ViewController {
             situationTally.reset()
         }
         if announcesStart {
-            let situationCheckAnnouncementDelay: TimeInterval = 1.0
-            DispatchQueue.main.asyncAfter(deadline: .now() + situationCheckAnnouncementDelay) { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + announcementDelay) { [weak self] in
                 // ポーチに入れて使うので、スマホではなく体ごと向きを変えてもらう
                 self?.interruptAndSpeak(text: "周囲の空席と混み具合を確認します。体ごと、ゆっくり左右に向きを変えてください。")
             }
@@ -214,7 +220,6 @@ extension ViewController {
         abortConfirmationDeadline = nil
         noSeatMonitor.reset()
         directionHaptics.stop()
-        updateAccessibilityForCurrentState()
         startSituationCheckIfNeeded(announcesStart: false)
     }
 

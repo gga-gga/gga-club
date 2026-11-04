@@ -139,7 +139,12 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
         // 連続推論ループ開始
         self.startCoreMLLoopIfNeeded()
         if isGuidancePaused {
-            startSituationCheckIfNeeded()
+            // VoiceOver がオンだと、画面が開いた直後に VoiceOver が画面の説明を読む。
+            // それとアプリの最初の読み上げが重ならないよう、そのときだけ少し遅らせて話し始める
+            let delay = UIAccessibility.isVoiceOverRunning
+                ? ViewController.firstAnnouncementDelayWithVoiceOver
+                : ViewController.firstAnnouncementDelay
+            startSituationCheckIfNeeded(announcementDelay: delay)
         }
         // 背面タップはこの画面が表示されている間だけ受け取る（ViewController+BackTap）
         ShortcutActionCenter.shared.setHandler(self)
@@ -346,7 +351,6 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
     /// 到着時に「続ける」を選んだ
     func continueAfterArrival() {
         isAwaitingArrivalDecision = false
-        updateAccessibilityForCurrentState()
         arrivalGuideRepeatTimer?.invalidate()
         arrivalGuideRepeatTimer = nil
     }
@@ -356,7 +360,6 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
         // 終了処理中フラグON（この間は他の案内は一切禁止）
         isFinishingNavigation = true
         isAwaitingArrivalDecision = false
-        updateAccessibilityForCurrentState()
         arrivalGuideRepeatTimer?.invalidate()
         arrivalGuideRepeatTimer = nil
 
@@ -381,7 +384,6 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
         isGuidancePaused = false
         abortConfirmationDeadline = nil
         stopSituationCheck()
-        updateAccessibilityForCurrentState()
 
         noSeatMonitor.startCounting(at: CACurrentMediaTime())
 
@@ -394,7 +396,6 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
     func beginArrivalDecision() {
         DispatchQueue.main.async {
             self.isAwaitingArrivalDecision = true
-            self.updateAccessibilityForCurrentState()
             self.arrivalFeedback.notificationOccurred(.success)
 
             let arrivalGuideDelay: TimeInterval = 1.5
