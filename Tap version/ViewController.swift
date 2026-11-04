@@ -62,6 +62,8 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
     // ======= 音声案内（TTS）関連 =======
     // 背面タップ（2回）ですぐ読み上げるための、直近の案内先の方向と距離（メインスレッドで更新）
     var latestGuidance: TargetGuidance?
+    // 次の方向の案内を、丁寧な言い方（初回の言い方）にするか。2回目以降は短い言い方にする
+    var needsFullGuidanceSentence = true
     // 誘導中の中断の確認：この時刻までにもう一度3回タップされたら中断する（ViewController+BackTap）
     var abortConfirmationDeadline: TimeInterval?
     // 到着後、「終了／続ける」の背面タップを待っているとき true
@@ -355,6 +357,8 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
     /// 到着時に「続ける」を選んだ
     func continueAfterArrival() {
         isAwaitingArrivalDecision = false
+        // 到着のあと案内を続けるときは、次の方向の案内を丁寧な言い方に戻す
+        needsFullGuidanceSentence = true
         arrivalGuideRepeatTimer?.invalidate()
         arrivalGuideRepeatTimer = nil
     }
@@ -381,6 +385,8 @@ final class ViewController: UIViewController, ARSCNViewDelegate {
 
     /// 誘導を開始する（状況確認の結果の後、背面タップ3回）
     func startGuidance() {
+        // 誘導の最初の方向の案内は、丁寧な言い方にする
+        needsFullGuidanceSentence = true
         // 状況確認で見回している間が候補を集める時間にあたるので、待たずに最も近い空席を選ばせる
         stateQueue.sync {
             seatTracker.requestImmediateSelection()

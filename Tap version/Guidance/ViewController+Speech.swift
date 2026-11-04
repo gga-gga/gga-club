@@ -17,6 +17,8 @@ extension ViewController {
     /// 案内（方向と距離）の繰り返しの間隔：前の発話が「終わってから」この秒数あける。
     /// 以前は前の発話を「始めてから」3秒だったため、案内文（3秒以上かかる）がほぼ途切れず続いていた
     static let guidanceIntervalAfterSpeech: TimeInterval = 1.5
+    /// この秒数より長く何も話していなかったら、方向の案内を丁寧な言い方に戻す
+    static let guidanceFullSentenceAfterSilence: TimeInterval = 15.0
 
     /// いま話している内容やキューを全部止めて、新しいテキストを読み上げる
     /// - Parameter soundEffect: 話す前に効果音を鳴らすか。背面タップへの応答では false にする
@@ -47,28 +49,41 @@ extension ViewController {
         if speechOutput.isBusy { return }
         if speechOutput.secondsSinceLastSpeech < Self.guidanceIntervalAfterSpeech { return }
 
-        speechOutput.speak(speechOutput.makeUtterance(guidanceSentence(for: guidance)))
+        // 初回（と、丁寧な言い方に戻す場面の直後）は丁寧に、2回目以降は短く言う。
+        // しばらく何も話していなかったときも、聞き手が流れを見失っているかもしれないので丁寧に戻す
+        if speechOutput.secondsSinceLastSpeech > Self.guidanceFullSentenceAfterSilence {
+            needsFullGuidanceSentence = true
+        }
+        let short = !needsFullGuidanceSentence
+        speechOutput.speak(speechOutput.makeUtterance(guidanceSentence(for: guidance, short: short)))
+        needsFullGuidanceSentence = false
     }
 
     /// 背面タップ（2回）で、今の方向と距離をすぐに読み上げる
     func speakGuidanceNow() {
         speechOutput.stop()
         if let guidance = latestGuidance {
-            speechOutput.speak(speechOutput.makeUtterance(guidanceSentence(for: guidance)))
+            // 利用者が自分から確かめたい場面なので、丁寧な言い方で答える
+            speechOutput.speak(speechOutput.makeUtterance(guidanceSentence(for: guidance, short: false)))
         } else {
             speechOutput.speak(speechOutput.makeUtterance("案内できる空席を探しています。"))
         }
     }
 
     /// 案内の読み上げ文。後ろ（90°以上）のときは振動を止めているので、言葉で後ろだと伝える
-    ///  - 経路あり：「11時方向へ進んでください、空席まで残り2.3メートル」（振動と同じ、進む方向）
-    ///  - 経路なし：「空席、1時方向、残り2.3メートル」（空席そのものの方向）
-    private func guidanceSentence(for guidance: TargetGuidance) -> String {
+    ///  - 経路あり（丁寧）：「11時方向へ進んでください、空席まで残り2.3メートル」（振動と同じ、進む方向）
+    ///  - 経路あり（短い）：「11時方向、残り2.3メートル」
+    ///  - 経路なし：「空席、1時方向、残り2.3メートル」（空席そのものの方向。短い形も同じ）
+    /// - Parameter short: 2回目以降の短い言い方にするか
+    private func guidanceSentence(for guidance: TargetGuidance, short: Bool) -> String {
         let direction = GuidanceMath.directionPhrase(fromYawDeg: guidance.yawDeg) ?? ""
         let distance = GuidanceMath.distancePhrase(fromMeters: guidance.distance)
 
         if guidance.followsPath {
             let behind = guidance.isBehind ? "後ろです、" : ""
+            if short {
+                return "\(behind)\(direction)、\(distance)"
+            }
             return "\(behind)\(direction)へ進んでください、空席まで\(distance)"
         }
         let head = guidance.isBehind ? "空席は後ろです" : "空席"
@@ -88,6 +103,8 @@ extension ViewController {
         let text: String
         switch event {
         case .switched(let reason, _):
+            // 案内先が変わったので、次の方向の案内は丁寧な言い方に戻す
+            needsFullGuidanceSentence = true
             text = "\(targetLossPhrase(reason))別の空席を案内します。"
         case .lost(let reason):
             text = targetLossPhrase(reason)
