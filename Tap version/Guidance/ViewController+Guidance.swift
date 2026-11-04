@@ -88,8 +88,8 @@ extension ViewController {
     ///   （床を確認できずにやり直すときは、やり直しの案内を先に読み上げているので読み上げない）
     /// 画面が開いた直後の最初の読み上げまでの秒数（VoiceOver がオフのとき）
     static let firstAnnouncementDelay: TimeInterval = 1.0
-    /// 同上（VoiceOver がオンのとき）。VoiceOver が画面の説明を読み終えるのを待つ
-    static let firstAnnouncementDelayWithVoiceOver: TimeInterval = 3.0
+    /// 同上（VoiceOver がオンのとき）。VoiceOver が画面の説明（「空席ナビ」）を読み終えるのを待つ
+    static let firstAnnouncementDelayWithVoiceOver: TimeInterval = 1.5
 
     /// - Parameter announcementDelay: 開始の読み上げまでの秒数
     func startSituationCheckIfNeeded(announcesStart: Bool = true,

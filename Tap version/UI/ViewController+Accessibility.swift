@@ -25,6 +25,7 @@ extension ViewController {
         // 説明文は固定にして、状態が変わっても書き換えない。
         // フォーカスのある要素の説明文を書き換えると、VoiceOver がそれを自動で読み直し、
         // 誘導開始や到着のときのアプリの読み上げと重なっていたため
-        sceneView.accessibilityLabel = "空席ナビ。操作は背面タップで行います。"
+        // 画面が開いたときに VoiceOver が読むのはこの説明だけなので、できるだけ短くしている
+        sceneView.accessibilityLabel = "空席ナビ"
     }
 }
