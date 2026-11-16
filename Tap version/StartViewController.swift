@@ -26,6 +26,7 @@ final class StartViewController: UIViewController, ShortcutActionHandling {
         // 要素自体は残しておくので、マジックタップ・エスケープはこれまでどおり受け付ける
         view.isAccessibilityElement = true
         view.accessibilityLabel = ""
+        configureSpatialAudioDemoButton()
     }
 
     override func viewDidAppear(_ animated: Bool) {
@@ -67,6 +68,35 @@ final class StartViewController: UIViewController, ShortcutActionHandling {
     override func accessibilityPerformEscape() -> Bool {
         handleShortcutAction(.secondary)
         return true
+    }
+
+    // MARK: - 立体音響の体験（試作）
+
+    /// スタッフ用：立体音響の体験画面を開くボタンを右下に置く。
+    /// 画面全体が VoiceOver の1つの要素なので、このボタンは VoiceOver には読まれない
+    /// （VoiceOver がオンの間は押せないので、押すときだけ VoiceOver をオフにする）
+    private func configureSpatialAudioDemoButton() {
+        let button = UIButton(type: .system)
+        button.setTitle("音デモ", for: .normal)
+        button.setTitleColor(.white, for: .normal)
+        button.backgroundColor = UIColor.black.withAlphaComponent(0.6)
+        button.layer.cornerRadius = 8
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.addTarget(self, action: #selector(showSpatialAudioDemo), for: .touchUpInside)
+        view.addSubview(button)
+        NSLayoutConstraint.activate([
+            button.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -16),
+            button.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -16),
+            button.widthAnchor.constraint(equalToConstant: 84),
+            button.heightAnchor.constraint(equalToConstant: 44)
+        ])
+    }
+
+    @objc private func showSpatialAudioDemo() {
+        guard presentedViewController == nil else { return }
+        let demo = SpatialAudioDemoViewController()
+        demo.modalPresentationStyle = .fullScreen
+        present(demo, animated: true)
     }
 
     /// 誘導画面を開く（以前は「案内を開始」ボタンの segue で開いていた）
