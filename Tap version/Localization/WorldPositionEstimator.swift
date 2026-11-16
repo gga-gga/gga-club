@@ -12,6 +12,13 @@
 //    3. 品質ゲート：点が少なすぎる・広がりすぎ（他の物が混ざった）なら推定しない
 //  推定できないときは「位置なし」とする（正確さ優先。誤った位置へ案内するよりは案内しない）。
 //
+//  遠い椅子（約2.5m以上）への対応：
+//    遠いほど座面は浅い角度で見えて画素数が減り（距離の3乗にほぼ反比例）、LiDAR の信頼度も
+//    「高」になりにくい。近距離と同じ基準のままだと、空いているのに座面を確認できなかった。
+//    そこで (a) 必要な点の数を距離に応じて減らし、(b) 信頼度「高」の点だけで足りないときは
+//    「中」の点も使う。高さ・法線・広がりの条件は変えない（座面らしさの判定は緩めない）。
+//    足りなかったときは、どの条件で画素が落ちたかをデバッグ表示に出す。
+//
 
 import ARKit
 import UIKit
@@ -23,8 +30,26 @@ enum SeatLocalizationConfig {
     /// 座面とみなす床からの高さ[m]。一般的なデスク椅子の座面 0.42〜0.52m ＋クッションを想定（仮値・要実測）
     static let seatHeightMin: Float = 0.30
     static let seatHeightMax: Float = 0.60
-    /// 品質ゲート：座面の点がこれ未満なら推定しない（仮値・要実測）
+    /// 品質ゲート：座面の点がこれ未満なら推定しない（仮値・要実測）。
+    /// nearDistanceMeters より近い椅子に使う値
     static let minSurfacePoints = 20
+    /// この距離[m]までは minSurfacePoints をそのまま要求する
+    static let nearDistanceMeters: Float = 2.0
+    /// 遠い椅子でも最低限これだけの点は要求する（仮値・要実測）
+    static let minSurfacePointsFar = 8
+    /// 信頼度「高」の点だけで足りないとき、「中」の点も使うか。
+    /// false にすると以前と同じ（「高」だけ）になる
+    static let allowsMediumConfidenceFallback = true
+
+    /// 椅子までの水平距離に応じた、必要な座面の点の数。
+    /// 座面が占める画素数は距離の3乗にほぼ反比例するので、同じ割合で減らす
+    /// （例：2.0mまで20点、2.5mで約11点、3.0m以上は8点）
+    static func requiredSurfacePoints(atDistance distance: Float?) -> Int {
+        guard let distance, distance > nearDistanceMeters else { return minSurfacePoints }
+        let ratio = nearDistanceMeters / distance
+        let scaled = Int((Float(minSurfacePoints) * ratio * ratio * ratio).rounded(.up))
+        return min(minSurfacePoints, max(minSurfacePointsFar, scaled))
+    }
     /// 品質ゲート：座面の点の広がり（10〜90パーセンタイル範囲）がこれを超えたら、
     /// 隣の椅子などが混ざったとみなして推定しない。座面そのものの幅（約0.5m）より少し大きくしてある
     static let maxSurfaceExtentMeters: Float = 0.7
@@ -42,6 +67,8 @@ struct SeatPlacement {
     let cameraPosition: simd_float3
     /// 推定に使った座面の点の数
     let surfacePointCount: Int
+    /// 信頼度「中」の点も使ったか（「高」だけでは足りなかった）
+    let usedMediumConfidence: Bool
     /// 座面の点の広がり[m]（カメラから見て左右方向・奥行き方向）
     let lateralExtent: Float
     let depthExtent: Float
@@ -56,14 +83,32 @@ struct SeatPlacement {
     }
 }
 
+/// 座面の点が足りなかったとき、BBox 内の画素がどの条件で落ちたかの内訳（デバッグ表示用）
+struct SeatSurfaceRejects {
+    /// 高さが座面の範囲外（床・背もたれ・奥の壁など）
+    var wrongHeight = 0
+    /// 高さは合うが、面が水平でない（背もたれの下の方、斜めに見えた面など）
+    var wrongNormal = 0
+    /// 高さも向きも座面らしいが、LiDAR の信頼度が「低」
+    var lowConfidence = 0
+    /// 高さも向きも座面らしく、信頼度が「中」（中の点を使わない設定のときだけ数える）
+    var mediumConfidence = 0
+
+    var debugText: String {
+        var parts = ["高さ✕\(wrongHeight)", "向き✕\(wrongNormal)", "信頼度低✕\(lowConfidence)"]
+        if mediumConfidence > 0 { parts.append("信頼度中✕\(mediumConfidence)") }
+        return parts.joined(separator: " ")
+    }
+}
+
 /// 座面の推定に失敗した理由（デバッグ表示用）
 enum SeatLocalizationFailure {
     /// 床の高さがまだ推定されていない（OGM が床を見ていない）
     case noFloorEstimate
     /// 深度が取れない（深度マップが無い・BBox が画像外）
     case noDepth
-    /// 座面らしい点が少なすぎる
-    case tooFewPoints(Int)
+    /// 座面らしい点が少なすぎる（count: 集まった点、needed: 必要な点、rejects: 落ちた画素の内訳）
+    case tooFewPoints(count: Int, needed: Int, rejects: SeatSurfaceRejects)
     /// 座面らしい点が広がりすぎている（他の物が混ざった）
     case tooSpread(lateral: Float, depth: Float)
     /// ARKit の位置推定が不安定（正常でない）なので推定しない
@@ -74,7 +119,8 @@ enum SeatLocalizationFailure {
         case .noFloorEstimate: return "床未推定"
         case .trackingLimited: return "位置推定が不安定"
         case .noDepth: return "深度なし"
-        case .tooFewPoints(let count): return "点不足(\(count))"
+        case .tooFewPoints(let count, let needed, let rejects):
+            return "点不足(\(count)/\(needed)) \(rejects.debugText)"
         case .tooSpread(let lateral, let depth):
             return String(format: "広がり過大(幅%.2f 奥%.2f)", lateral, depth)
         }
@@ -171,8 +217,12 @@ enum WorldPositionEstimator {
         let normalSampleOffset = 2
         let discontinuity = OGMConfig.maxDepthDiscontinuityMeters
 
-        // 2) 座面らしい点だけを集める
-        var surfacePoints: [simd_float3] = []
+        // 2) 座面らしい点だけを集める。信頼度「高」と「中」は分けて集めておく
+        let highConfidence = UInt8(ARConfidenceLevel.high.rawValue)
+        let mediumConfidence = UInt8(ARConfidenceLevel.medium.rawValue)
+        var highPoints: [simd_float3] = []
+        var mediumPoints: [simd_float3] = []
+        var rejects = SeatSurfaceRejects()
         var py = y0
         while py <= y1 {
             var px = x0
@@ -184,10 +234,9 @@ enum WorldPositionEstimator {
                                           y: (CGFloat(py) + 0.5) / CGFloat(height))
                 if personRegions.contains(where: { $0.contains(nativePoint) }) { continue }
 
-                if let confidenceBuf,
-                   confidenceBuf[py * confidenceRowStride + px] < UInt8(ARConfidenceLevel.high.rawValue) {
-                    continue
-                }
+                // 信頼度はここでは落とさず、形（高さ・向き）を見たあとで振り分ける
+                // （形は座面なのに信頼度だけで落ちた画素を数えるため）
+                let confidence = confidenceBuf.map { $0[py * confidenceRowStride + px] } ?? highConfidence
 
                 let depth = depthBuf[py * depthRowStride + px]
                 guard depth.isFinite,
@@ -212,26 +261,60 @@ enum WorldPositionEstimator {
                 // 高さ：座面の範囲か
                 let heightAboveFloor = world.y - floorY
                 guard heightAboveFloor >= SeatLocalizationConfig.seatHeightMin,
-                      heightAboveFloor <= SeatLocalizationConfig.seatHeightMax else { continue }
+                      heightAboveFloor <= SeatLocalizationConfig.seatHeightMax else {
+                    rejects.wrongHeight += 1
+                    continue
+                }
 
                 // 法線：上向き（水平面）か
                 let normalCamera = simd_cross(right - center, down - center)
                 let normalLength = simd_length(normalCamera)
                 guard normalLength > 1e-6 else { continue }
                 let worldNormal = rotation * (normalCamera / normalLength)
-                guard abs(worldNormal.y) >= OGMConfig.walkableNormalAlignmentThreshold else { continue }
+                guard abs(worldNormal.y) >= OGMConfig.walkableNormalAlignmentThreshold else {
+                    rejects.wrongNormal += 1
+                    continue
+                }
 
-                surfacePoints.append(world)
+                // 形は座面らしい。信頼度で振り分ける
+                if confidence >= highConfidence {
+                    highPoints.append(world)
+                } else if confidence >= mediumConfidence {
+                    if SeatLocalizationConfig.allowsMediumConfidenceFallback {
+                        mediumPoints.append(world)
+                    } else {
+                        rejects.mediumConfidence += 1
+                    }
+                } else {
+                    rejects.lowConfidence += 1
+                }
             }
             py += pixelStride
         }
 
         // 3) 品質ゲート
-        guard surfacePoints.count >= SeatLocalizationConfig.minSurfacePoints else {
-            return .failed(.tooFewPoints(surfacePoints.count))
+        let cameraPosition = simd_float3(cameraToWorld.columns.3.x, cameraToWorld.columns.3.y, cameraToWorld.columns.3.z)
+
+        // 必要な点の数は、椅子までの距離で決める（遠いほど座面の画素が減るため）
+        let candidatePoints = highPoints + mediumPoints
+        let candidateDistance: Float? = candidatePoints.isEmpty ? nil : median(candidatePoints.map {
+            simd_length(simd_float2($0.x - cameraPosition.x, $0.z - cameraPosition.z))
+        })
+        let neededPoints = SeatLocalizationConfig.requiredSurfacePoints(atDistance: candidateDistance)
+
+        // 信頼度「高」だけで足りればそれを使い、足りなければ「中」も合わせて使う
+        let surfacePoints: [simd_float3]
+        let usedMediumConfidence: Bool
+        if highPoints.count >= neededPoints {
+            surfacePoints = highPoints
+            usedMediumConfidence = false
+        } else if candidatePoints.count >= neededPoints {
+            surfacePoints = candidatePoints
+            usedMediumConfidence = true
+        } else {
+            return .failed(.tooFewPoints(count: candidatePoints.count, needed: neededPoints, rejects: rejects))
         }
 
-        let cameraPosition = simd_float3(cameraToWorld.columns.3.x, cameraToWorld.columns.3.y, cameraToWorld.columns.3.z)
         let back = simd_float3(cameraToWorld.columns.2.x, cameraToWorld.columns.2.y, cameraToWorld.columns.2.z)
         let forwardFlat = simd_float3(-back.x, 0, -back.z)
         guard simd_length(forwardFlat) > 1e-4 else { return .failed(.noDepth) }
@@ -261,6 +344,7 @@ enum WorldPositionEstimator {
         return .located(SeatPlacement(worldPosition: seatCenter,
                                       cameraPosition: cameraPosition,
                                       surfacePointCount: surfacePoints.count,
+                                      usedMediumConfidence: usedMediumConfidence,
                                       lateralExtent: lateralExtent,
                                       depthExtent: depthExtent,
                                       centerScreenPoint: centerScreenPoint,

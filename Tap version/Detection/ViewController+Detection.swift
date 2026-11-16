@@ -131,7 +131,9 @@ extension ViewController {
             case .located(let placement)?:
                 let spread = String(format: "幅%.2f 奥%.2f", placement.lateralExtent, placement.depthExtent)
                 let distance = String(format: "%.2f", placement.horizontalDistance)
-                return "\(head) | 座面\(placement.surfacePointCount)点 \(spread) | \(distance)m"
+                // 「中込」＝信頼度「高」の点だけでは足りず、「中」の点も使った（遠い椅子で起きやすい）
+                let confidenceNote = placement.usedMediumConfidence ? "(中込)" : ""
+                return "\(head) | 座面\(placement.surfacePointCount)点\(confidenceNote) \(spread) | \(distance)m"
             case .failed(let failure)?:
                 return "\(head) | ✕\(failure.debugText)"
             case nil:
