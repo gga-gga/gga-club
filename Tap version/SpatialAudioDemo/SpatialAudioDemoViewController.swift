@@ -18,7 +18,9 @@
 //   |------------|---------------------|---------------------|
 //   | 始める前   | 説明を聞く           | 始める               |
 //   | 体験の途中 | 中止する             | 今の回を飛ばす        |
-//  画面のボタンはスタッフ用（音の種類の切り替え、結果のコピー、閉じる）。
+//  画面のボタンはスタッフ用（方向の付け方・音の種類の切り替え、結果のコピー、閉じる）。
+//  方向の付け方（立体音響／左右の音量だけ）と音の種類（ビープ音／倍音ビープ／雑音パルス）を
+//  別々に選べるので、「方向の付け方の差」と「音の種類の差」を分けて比べられる。
 //
 
 import ARKit
@@ -85,10 +87,12 @@ final class SpatialAudioDemoViewController: UIViewController, ShortcutActionHand
     /// 体験を始めたときの設定（結果に書く）
     private var sessionRendering: SpatialBeaconPlayer.Rendering = .hrtf
     private var sessionUsesAlignedCue = true
+    private var sessionTone: SpatialBeaconPlayer.Tone = .beep
 
     // MARK: - 画面の部品（スタッフ用）
 
     private let renderingControl = UISegmentedControl(items: ["立体音響", "左右の音量だけ"])
+    private let toneControl = UISegmentedControl(items: SpatialBeaconPlayer.Tone.allCases.map { $0.displayName })
     private let cueSwitch = UISwitch()
     private let statusLabel = UILabel()
     private let resultView = UITextView()
@@ -166,7 +170,11 @@ final class SpatialAudioDemoViewController: UIViewController, ShortcutActionHand
     private func startSession() {
         sessionRendering = renderingControl.selectedSegmentIndex == 0 ? .hrtf : .panning
         sessionUsesAlignedCue = cueSwitch.isOn
+        let tones = SpatialBeaconPlayer.Tone.allCases
+        sessionTone = tones.indices.contains(toneControl.selectedSegmentIndex)
+            ? tones[toneControl.selectedSegmentIndex] : .beep
         beacon.rendering = sessionRendering
+        beacon.tone = sessionTone
         beacon.isSounding = false
         results = []
         trialIndex = 0
@@ -353,7 +361,7 @@ final class SpatialAudioDemoViewController: UIViewController, ShortcutActionHand
 
     private func resultText() -> String {
         let renderingName = sessionRendering == .hrtf ? "立体音響" : "左右の音量だけ"
-        var lines = ["設定：\(renderingName)・正面の合図\(sessionUsesAlignedCue ? "あり" : "なし")"]
+        var lines = ["設定：\(renderingName)・\(sessionTone.displayName)・正面の合図\(sessionUsesAlignedCue ? "あり" : "なし")"]
 
         var foundSeconds: [TimeInterval] = []
         var turnsJudged = 0
@@ -406,6 +414,14 @@ final class SpatialAudioDemoViewController: UIViewController, ShortcutActionHand
         titleLabel.font = .preferredFont(forTextStyle: .title2)
 
         renderingControl.selectedSegmentIndex = 0
+        toneControl.selectedSegmentIndex = 0
+
+        let renderingLabel = UILabel()
+        renderingLabel.text = "方向の付け方"
+        renderingLabel.font = .preferredFont(forTextStyle: .footnote)
+        let toneLabel = UILabel()
+        toneLabel.text = "音の種類"
+        toneLabel.font = .preferredFont(forTextStyle: .footnote)
 
         let cueLabel = UILabel()
         cueLabel.text = "正面に来たら音を変える"
@@ -440,10 +456,13 @@ final class SpatialAudioDemoViewController: UIViewController, ShortcutActionHand
         bottomRow.distribution = .fillEqually
         bottomRow.spacing = 12
 
-        let stack = UIStackView(arrangedSubviews: [titleLabel, renderingControl, cueRow, statusLabel,
+        let stack = UIStackView(arrangedSubviews: [titleLabel, renderingLabel, renderingControl,
+                                                   toneLabel, toneControl, cueRow, statusLabel,
                                                    startButton, resultView, bottomRow])
         stack.axis = .vertical
         stack.spacing = 16
+        stack.setCustomSpacing(4, after: renderingLabel)
+        stack.setCustomSpacing(4, after: toneLabel)
         stack.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(stack)
 
