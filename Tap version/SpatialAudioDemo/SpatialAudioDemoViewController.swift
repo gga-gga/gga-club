@@ -13,6 +13,14 @@
 //  体の向きは ARKit のカメラの向きから求める（誘導画面と同じ：正面 = カメラの -Z、右が +）。
 //  音源の方向は回の始めに「そのときの正面から右へ何度」で決め、部屋に固定する。
 //
+//  頭の向きと胸の向きの使い分け（どちらのイヤホンでも使えるようにしている）：
+//   - 音の鳴らし方：対応イヤホン（AirPods など）なら頭の向き、それ以外は胸の向きで決める。
+//     頭の向きを使うと、首を振っても音が部屋の同じ方向に留まり、前後を聞き分けやすい。
+//   - 「正面に向いた」の判定・最初の向き：いつも胸（体）の向きで決める。誘導と同じく、
+//     体が音の方を向いたときだけ成功にする。
+//   - 頭の向きは、回の始めに「頭は体と同じ方を向いている」とみなして合わせる。
+//     回の途中で受信が途切れたら、その回の残りは胸の向きで鳴らす。
+//
 //  操作（背面タップ。誘導画面と同じショートカットを使う）：
 //   | 状態       | 2回                 | 3回                 |
 //   |------------|---------------------|---------------------|
@@ -61,16 +69,33 @@ final class SpatialAudioDemoViewController: UIViewController, ShortcutActionHand
         case skipped
     }
 
+    /// その回で、音の鳴らし方に何の向きを使ったか
+    private enum ListeningSource {
+        case head          // 最後まで頭の向き
+        case chest         // 最初から胸の向き
+        case headThenChest // 途中で頭の向きが途切れ、胸の向きに切り替えた
+
+        var text: String {
+            switch self {
+            case .head: return "頭"
+            case .chest: return "胸"
+            case .headThenChest: return "頭→胸"
+            }
+        }
+    }
+
     private struct TrialResult {
         let offsetDeg: Float
         let outcome: Outcome
         /// 最初に向きを変えた側が、音源のある側だったか（向きを変える前に終わったら nil）
         let firstTurnCorrect: Bool?
+        let listeningSource: ListeningSource
     }
 
     private let arSession = ARSession()
     private let speechOutput = SpeechOutput()
     private let beacon = SpatialBeaconPlayer()
+    private let headTracker = HeadOrientationTracker()
     private var displayLink: CADisplayLink?
 
     private var phase: Phase = .idle
@@ -84,16 +109,22 @@ final class SpatialAudioDemoViewController: UIViewController, ShortcutActionHand
     private var trialStartedAt: TimeInterval = 0
     private var alignedSince: TimeInterval?
     private var firstTurnCorrect: Bool?
+    /// 頭の向きを合わせたときの値（頭の向き・そのときの胸の正面）。頭の向きを使わない回は nil
+    private var headCalibration: (yaw: Double, forward: simd_float2)?
+    private var trialListeningSource: ListeningSource = .chest
     /// 体験を始めたときの設定（結果に書く）
     private var sessionRendering: SpatialBeaconPlayer.Rendering = .hrtf
     private var sessionUsesAlignedCue = true
     private var sessionTone: SpatialBeaconPlayer.Tone = .beep
+    private var sessionUsesHead = true
 
     // MARK: - 画面の部品（スタッフ用）
 
     private let renderingControl = UISegmentedControl(items: ["立体音響", "左右の音量だけ"])
     private let toneControl = UISegmentedControl(items: SpatialBeaconPlayer.Tone.allCases.map { $0.displayName })
     private let cueSwitch = UISwitch()
+    private let headSwitch = UISwitch()
+    private let headStatusLabel = UILabel()
     private let statusLabel = UILabel()
     private let resultView = UITextView()
     private let startButton = UIButton(type: .system)
@@ -115,6 +146,8 @@ final class SpatialAudioDemoViewController: UIViewController, ShortcutActionHand
         // 体の向きを知るためだけに ARKit を動かす（深度や平面の検出は使わない）
         arSession.run(ARWorldTrackingConfiguration())
         beacon.start()
+        // 始める前から受信しておき、対応イヤホンがつながっているかを画面に出す
+        headTracker.start()
 
         let link = CADisplayLink(target: self, selector: #selector(tick))
         link.preferredFramesPerSecond = 30
@@ -129,6 +162,7 @@ final class SpatialAudioDemoViewController: UIViewController, ShortcutActionHand
         displayLink?.invalidate()
         displayLink = nil
         beacon.stop()
+        headTracker.stop()
         speechOutput.stop()
         arSession.pause()
     }
@@ -173,6 +207,7 @@ final class SpatialAudioDemoViewController: UIViewController, ShortcutActionHand
         let tones = SpatialBeaconPlayer.Tone.allCases
         sessionTone = tones.indices.contains(toneControl.selectedSegmentIndex)
             ? tones[toneControl.selectedSegmentIndex] : .beep
+        sessionUsesHead = headSwitch.isOn
         beacon.rendering = sessionRendering
         beacon.tone = sessionTone
         beacon.isSounding = false
@@ -184,7 +219,10 @@ final class SpatialAudioDemoViewController: UIViewController, ShortcutActionHand
         let cue = sessionUsesAlignedCue
             ? "音が正面に来ると、高い音に変わります。"
             : "音が正面に来たら、声でお知らせします。"
-        say("音の方向を当てる体験を始めます。音が聞こえる方向へ、体ごとゆっくり向きを変えてください。\(cue)全部で\(count)回です。")
+        // 頭の向きを受信できているときだけ、首を振って確かめてよいと伝える
+        let usesHeadNow = sessionUsesHead && headTracker.currentYaw(now: CACurrentMediaTime()) != nil
+        let headHint = usesHeadNow ? "首を振って音の方向を確かめても構いません。最後は体ごと向けてください。" : ""
+        say("音の方向を当てる体験を始めます。音が聞こえる方向へ、体ごとゆっくり向きを変えてください。\(headHint)\(cue)全部で\(count)回です。")
         phase = .briefing
         phaseReadyAt = CACurrentMediaTime() + 1.0
         updateStatus("説明中…")
@@ -204,6 +242,15 @@ final class SpatialAudioDemoViewController: UIViewController, ShortcutActionHand
         alignedSince = nil
         firstTurnCorrect = nil
 
+        // 頭の向きを使うなら、ここで「頭は体と同じ方を向いている」とみなして合わせる
+        if sessionUsesHead, let headYaw = headTracker.currentYaw(now: now) {
+            headCalibration = (yaw: headYaw, forward: forward)
+            trialListeningSource = .head
+        } else {
+            headCalibration = nil
+            trialListeningSource = .chest
+        }
+
         beacon.usesAlignedPing = false
         beacon.setRelativeBearing(radians: offset)
         beacon.isSounding = true
@@ -215,10 +262,24 @@ final class SpatialAudioDemoViewController: UIViewController, ShortcutActionHand
         let offsetDeg = Self.trialOffsetsDeg[trialIndex]
 
         if let forward = currentForward() {
-            // 今の正面から見た音源の方向（右が +）
+            // 音を聞く向き：頭の向きを受信できていれば頭、なければ胸
+            var listeningForward = forward
+            if let calibration = headCalibration {
+                if let headYaw = headTracker.currentYaw(now: now) {
+                    let turn = Float(Self.wrapAngle(headYaw - calibration.yaw))
+                    listeningForward = cos(turn) * calibration.forward
+                        + sin(turn) * Self.right(of: calibration.forward)
+                } else {
+                    // 頭の向きが途切れたら、この回の残りは胸の向きで鳴らす
+                    headCalibration = nil
+                    trialListeningSource = .headThenChest
+                }
+            }
+            beacon.setRelativeBearing(radians: Self.signedAngle(from: listeningForward, to: target))
+
+            // 「正面に向いた」の判定は、体（胸）の正面から見た音源の方向で行う（右が +）
             let bearing = Self.signedAngle(from: forward, to: target)
             let bearingDeg = bearing * 180 / .pi
-            beacon.setRelativeBearing(radians: bearing)
 
             let isAligned = abs(bearingDeg) <= Self.alignedToleranceDeg
             beacon.usesAlignedPing = isAligned && sessionUsesAlignedCue
@@ -231,8 +292,13 @@ final class SpatialAudioDemoViewController: UIViewController, ShortcutActionHand
                 }
             }
 
-            let side = bearingDeg >= 0 ? "右" : "左"
-            updateStatus("\(trialIndex + 1) / \(Self.trialOffsetsDeg.count) 回目　音の方向：\(side) \(Int(abs(bearingDeg).rounded()))°")
+            var status = "\(trialIndex + 1) / \(Self.trialOffsetsDeg.count) 回目　音の方向（体から）：\(Self.sideText(degrees: bearingDeg))"
+            if headCalibration != nil {
+                // 頭が体からどちらへ向いているか（頭を右へ向けて「右」と出れば、向きの符号は正しい）
+                let headDeg = Self.signedAngle(from: forward, to: listeningForward) * 180 / .pi
+                status += "\n頭の向き（体から）：\(Self.sideText(degrees: headDeg))"
+            }
+            updateStatus(status)
 
             if isAligned {
                 let since = alignedSince ?? now
@@ -256,7 +322,9 @@ final class SpatialAudioDemoViewController: UIViewController, ShortcutActionHand
         beacon.usesAlignedPing = false
         results.append(TrialResult(offsetDeg: Self.trialOffsetsDeg[trialIndex],
                                    outcome: outcome,
-                                   firstTurnCorrect: firstTurnCorrect))
+                                   firstTurnCorrect: firstTurnCorrect,
+                                   listeningSource: trialListeningSource))
+        headCalibration = nil
         resultView.text = resultText()
         trialIndex += 1
 
@@ -323,6 +391,27 @@ final class SpatialAudioDemoViewController: UIViewController, ShortcutActionHand
             break
         }
         beacon.tick(now: now)
+        headTracker.tick(now: now)
+        updateHeadStatus(now: now)
+    }
+
+    /// 頭の向きを受信できているかを、スタッフ向けに表示する
+    private func updateHeadStatus(now: TimeInterval) {
+        let text: String
+        if !headSwitch.isOn {
+            text = "頭の向き：使わない（胸の向きで音を鳴らす）"
+        } else if !HeadOrientationTracker.hasUsageDescription {
+            text = "頭の向き：使えません（Info.plist に NSMotionUsageDescription が必要）"
+        } else if !headTracker.isSupported {
+            text = "頭の向き：この端末では使えません（胸の向きで音を鳴らす）"
+        } else if headTracker.currentYaw(now: now) == nil {
+            text = "頭の向き：受信なし（対応イヤホンでない・未接続・許可なし。胸の向きで音を鳴らす）"
+        } else {
+            text = "頭の向き：受信中（頭の向きで音を鳴らす）"
+        }
+        if headStatusLabel.text != text {
+            headStatusLabel.text = text
+        }
     }
 
     // MARK: - 体の向き
@@ -346,6 +435,16 @@ final class SpatialAudioDemoViewController: UIViewController, ShortcutActionHand
         atan2(simd_dot(b, right(of: a)), simd_dot(b, a))
     }
 
+    /// 角度[ラジアン]を −π〜π に収める
+    private static func wrapAngle(_ angle: Double) -> Double {
+        atan2(sin(angle), cos(angle))
+    }
+
+    /// 「右 45°」「左 10°」のような表示
+    private static func sideText(degrees: Float) -> String {
+        "\(degrees >= 0 ? "右" : "左") \(Int(abs(degrees).rounded()))°"
+    }
+
     // MARK: - 読み上げ・表示
 
     private func say(_ text: String) {
@@ -361,7 +460,7 @@ final class SpatialAudioDemoViewController: UIViewController, ShortcutActionHand
 
     private func resultText() -> String {
         let renderingName = sessionRendering == .hrtf ? "立体音響" : "左右の音量だけ"
-        var lines = ["設定：\(renderingName)・\(sessionTone.displayName)・正面の合図\(sessionUsesAlignedCue ? "あり" : "なし")"]
+        var lines = ["設定：\(renderingName)・\(sessionTone.displayName)・正面の合図\(sessionUsesAlignedCue ? "あり" : "なし")・頭の向き\(sessionUsesHead ? "使う" : "使わない")"]
 
         var foundSeconds: [TimeInterval] = []
         var turnsJudged = 0
@@ -391,7 +490,7 @@ final class SpatialAudioDemoViewController: UIViewController, ShortcutActionHand
             case .none:
                 turnText = "−"
             }
-            lines.append("\(index + 1)回目　\(side)\(angle)°　\(outcomeText)　最初の向き\(turnText)")
+            lines.append("\(index + 1)回目　\(side)\(angle)°　\(outcomeText)　最初の向き\(turnText)　聞く向き：\(result.listeningSource.text)")
         }
 
         if !results.isEmpty {
@@ -430,6 +529,17 @@ final class SpatialAudioDemoViewController: UIViewController, ShortcutActionHand
         cueRow.axis = .horizontal
         cueRow.spacing = 12
 
+        let headLabel = UILabel()
+        headLabel.text = "頭の向きを使う（対応イヤホン）"
+        headSwitch.isOn = true
+        let headRow = UIStackView(arrangedSubviews: [headLabel, headSwitch])
+        headRow.axis = .horizontal
+        headRow.spacing = 12
+
+        headStatusLabel.numberOfLines = 0
+        headStatusLabel.font = .preferredFont(forTextStyle: .footnote)
+        headStatusLabel.textColor = .secondaryLabel
+
         statusLabel.numberOfLines = 0
         statusLabel.font = .preferredFont(forTextStyle: .body)
 
@@ -457,12 +567,13 @@ final class SpatialAudioDemoViewController: UIViewController, ShortcutActionHand
         bottomRow.spacing = 12
 
         let stack = UIStackView(arrangedSubviews: [titleLabel, renderingLabel, renderingControl,
-                                                   toneLabel, toneControl, cueRow, statusLabel,
-                                                   startButton, resultView, bottomRow])
+                                                   toneLabel, toneControl, cueRow, headRow, headStatusLabel,
+                                                   statusLabel, startButton, resultView, bottomRow])
         stack.axis = .vertical
         stack.spacing = 16
         stack.setCustomSpacing(4, after: renderingLabel)
         stack.setCustomSpacing(4, after: toneLabel)
+        stack.setCustomSpacing(4, after: headRow)
         stack.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(stack)
 
