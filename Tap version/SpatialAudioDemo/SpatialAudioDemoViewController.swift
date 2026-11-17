@@ -217,11 +217,13 @@ final class SpatialAudioDemoViewController: UIViewController, ShortcutActionHand
 
         let count = Self.trialOffsetsDeg.count
         let cue = sessionUsesAlignedCue
-            ? "音が正面に来ると、高い音に変わります。"
-            : "音が正面に来たら、声でお知らせします。"
+            // 「来る」は音声合成が「きたる」と読むことがあるので、ひらがなで書く
+            ? "音が正面にくると、高い音に変わります。"
+            : "音が正面にきたら、声でお知らせします。"
         // 頭の向きを受信できているときだけ、首を振って確かめてよいと伝える
         let usesHeadNow = sessionUsesHead && headTracker.currentYaw(now: CACurrentMediaTime()) != nil
-        let headHint = usesHeadNow ? "首を振って音の方向を確かめても構いません。最後は体ごと向けてください。" : ""
+        // 「首を振って」は「ふ」のところで音声が二重に聞こえたため、言い方を変えている
+        let headHint = usesHeadNow ? "顔だけ左右に向けて、音の方向を確かめても構いません。最後は体ごと向けてください。" : ""
         say("音の方向を当てる体験を始めます。音が聞こえる方向へ、体ごとゆっくり向きを変えてください。\(headHint)\(cue)全部で\(count)回です。")
         phase = .briefing
         phaseReadyAt = CACurrentMediaTime() + 1.0
