@@ -22,7 +22,8 @@ enum LabelNodeFactory {
         var font = UIFont(name: "Futura", size: 0.15)
         font = font?.withTraits(traits: .traitBold)
         scnText.font = font
-        scnText.alignmentMode = kCAAlignmentCenter
+        // Swift 4.2 以降の名前（以前の kCAAlignmentCenter は Swift 5 では使えない）
+        scnText.alignmentMode = CATextLayerAlignmentMode.center.rawValue
         scnText.firstMaterial?.diffuse.contents = UIColor.orange
         scnText.firstMaterial?.specular.contents = UIColor.white
         scnText.firstMaterial?.isDoubleSided = true

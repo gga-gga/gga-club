@@ -33,7 +33,7 @@ final class StartViewController: UIViewController, ShortcutActionHandling {
         super.viewDidAppear(animated)
         // フォーカスをこの画面に移しておく（説明文が空なので何も読まれない）。
         // 誘導画面から戻ったときにフォーカスが行方不明になると、エスケープが効かないため
-        UIAccessibilityPostNotification(UIAccessibilityScreenChangedNotification, view)
+        UIAccessibility.post(notification: .screenChanged, argument: view)
         ShortcutActionCenter.shared.setHandler(self)
     }
 
