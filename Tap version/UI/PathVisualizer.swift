@@ -2,7 +2,7 @@
 //  PathVisualizer.swift
 //  SUWARERU
 //
-//  デバッグ用：A* の経路をカメラ映像の床の上に表示する（描画スレッドから呼ぶ）。
+//  デバッグ用：A* の経路をカメラ映像の床の少し上（膝くらいの高さ）に表示する（描画スレッドから呼ぶ）。
 //   - 赤い線と矢印：経路（矢印は 0.5m ごとに進む向きを指す）
 //   - 水色の大きい点：次に向かう点（読み上げ・振動の方向の元）
 //   - 緑の点：経路の終点（A* の目的地＝座席の手前）
@@ -20,8 +20,11 @@ final class PathVisualizer {
     private static let pathColor = UIColor(red: 1.0, green: 0.0, blue: 0.1, alpha: 1.0)
     private static let lineRadius: CGFloat = 0.012
     private static let arrowSpacing: Float = 0.5
-    /// 床に埋もれて見えなくならないよう、少しだけ浮かせる
-    private static let heightOffset: Float = 0.03
+    /// 経路を床からどれだけ浮かせて描くか[m]。
+    /// 胸の高さのカメラからは足元〜約1.5m先の床が映らないので、少し浮かせて近くの経路も見えるようにする。
+    /// 以前 0.9m（腰の高さ）にしたときは床から離れすぎて分かりにくかったため、膝くらいの高さにしている。
+    /// 0.03 にすると床の上に戻る
+    private static let heightOffset: Float = 0.3
 
     /// 矢印の頭（円すい。頂点が +Y を向いているので、進む向きへ回して使う）
     private static let arrowHead: SCNCone = {
